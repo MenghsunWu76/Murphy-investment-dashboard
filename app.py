@@ -3,13 +3,12 @@ import pandas as pd
 import plotly.express as px
 import yfinance as yf
 
-# --- 1. 頁面基礎設定 ---
-st.set_page_config(page_title="全天候戰情室 (v7.0 基準升級)", layout="wide")
-st.title("🛡️ 全天候動態曝險系統 (v7.0)")
-st.caption("核心：自動 ATH + 動態基準 (Ratchet Rule) + 閥值再平衡")
+# --- 1. 頁面基礎設定 (隱藏過大的標題介面) ---
+st.set_page_config(page_title="全天候戰情室", layout="wide")
+# 移除原本的大標題 st.title(...) 和 st.caption(...)，改為簡單的頂部資訊或直接進入內容
 
 # --- 2. 自動抓取 ATH 引擎 ---
-@st.cache_data(ttl=3600) # 設定 1 小時快取，因為 ATH 不會頻繁變動
+@st.cache_data(ttl=3600) # 設定 1 小時快取
 def get_ath_data():
     try:
         # 抓取大盤指數 (^TWII) 過去 5 年的數據
@@ -21,34 +20,44 @@ def get_ath_data():
         pass
     return 32996.0 # 若抓取失敗的預設值
 
-# 執行抓取
+# 背景執行抓取
 with st.spinner('正在連線計算歷史高點 (ATH)...'):
     ath_auto = get_ath_data()
 
 # --- 3. 側邊欄輸入區 ---
 with st.sidebar:
-    st.header("📝 每日監控數據輸入")
+    st.header("📝 監控數據輸入")
     
-    # A. 市場數據 & 基準設定
-    with st.expander("0. 市場位階與基準 (Auto)", expanded=True):
-        # 1. 自動顯示 ATH
-        st.metric("👑 歷史最高點 (ATH)", f"{ath_auto:,.0f}", help="自動抓取過去 5 年最高點")
+    # A. 市場數據 & ATH 修正 (新功能)
+    with st.expander("0. 市場位階 (ATH 修正)", expanded=True):
         
-        # 2. 手動輸入今日點數
+        # --- ATH 邏輯 ---
+        col_ath1, col_ath2 = st.columns([2, 1])
+        with col_ath1:
+            st.metric("自動抓取 ATH", f"{ath_auto:,.0f}")
+        with col_ath2:
+            use_manual_ath = st.checkbox("手動修正", value=False, help="若自動抓取的 ATH 有落差，請勾選此處手動輸入")
+            
+        if use_manual_ath:
+            final_ath = st.number_input("輸入正確 ATH", value=ath_auto, step=10.0, format="%.0f")
+            st.caption(f"⚠️ 使用手動 ATH: {final_ath:,.0f}")
+        else:
+            final_ath = ath_auto
+        
+        st.markdown("---")
+
+        # 1. 手動輸入今日點數
         current_index = st.number_input("今日大盤收盤點數", value=31346.0, step=10.0, format="%.0f")
         
-        # 3. 計算 MDD
-        if ath_auto > 0:
-            mdd_pct = ((ath_auto - current_index) / ath_auto) * 100
+        # 2. 計算 MDD (使用 final_ath)
+        if final_ath > 0:
+            mdd_pct = ((final_ath - current_index) / final_ath) * 100
         else:
             mdd_pct = 0.0
             
-        st.info(f"📉 目前 MDD: -{mdd_pct:.2f}%")
+        st.info(f"📉 目前 MDD: -{mdd_pct:.2f}% (ATH: {final_ath:,.0f})")
         
-        st.markdown("---")
-        
-        # 4. 動態基準設定 (Ratchet Rule)
-        st.caption("📈 動態基準設定 (上限 30%)")
+        # 3. 動態基準設定 (Ratchet Rule)
         base_exposure = st.number_input(
             "目前基準曝險 % (Tier 1)", 
             value=23.0, 
@@ -60,7 +69,6 @@ with st.sidebar:
 
     # B. 資產數據輸入
     with st.expander("1. 攻擊型資產 (正二)", expanded=True):
-        st.caption("Beta: 台股 1.6 / 美股 2.0")
         col_a1, col_a2 = st.columns(2)
         p_675 = col_a1.number_input("00675L 價格", value=185.0, step=0.1)
         s_675 = col_a2.number_input("00675L 股數", value=11000, step=1000)
@@ -74,19 +82,16 @@ with st.sidebar:
         s_670 = col_c2.number_input("00670L 股數", value=616, step=100)
 
     with st.expander("2. 核心資產 (美股)", expanded=True):
-        st.caption("Beta: 1.0")
         col_d1, col_d2 = st.columns(2)
         p_662 = col_d1.number_input("00662 價格", value=102.25, step=0.1)
         s_662 = col_d2.number_input("00662 股數", value=25840, step=100)
 
     with st.expander("3. 防禦資產 (現金流)", expanded=True):
-        st.caption("Beta: 0.6")
         col_e1, col_e2 = st.columns(2)
         p_713 = col_e1.number_input("00713 價格", value=52.10, step=0.05)
         s_713 = col_e2.number_input("00713 股數", value=66000, step=1000)
 
     with st.expander("4. 子彈庫 (國庫券/債券)", expanded=True):
-        st.caption("Beta: 0.0 / -0.1")
         col_f1, col_f2 = st.columns(2)
         p_865 = col_f1.number_input("00865B 價格", value=47.51, step=0.01)
         s_865 = col_f2.number_input("00865B 股數", value=10000, step=1000)
@@ -101,10 +106,9 @@ with st.sidebar:
 # --- 3. 邏輯運算引擎 ---
 
 # A. 定義階梯策略表 (動態更新)
-# 這裡將 Tier 1 的目標改為變數 base_exposure
 ladder_data = [
     {"MDD區間": "< 5% (高位)", "目標曝險": base_exposure, "位階": "Tier 1 (基準)"},
-    {"MDD區間": "5% ~ 10%", "目標曝險": max(28.0, base_exposure), "位階": "Tier 1-2 (警戒)"}, # 若基準升高，此層也會被墊高
+    {"MDD區間": "5% ~ 10%", "目標曝險": max(28.0, base_exposure), "位階": "Tier 1-2 (警戒)"},
     {"MDD區間": "10% ~ 25%", "目標曝險": 28, "位階": "Tier 2 (初跌)"},
     {"MDD區間": "25% ~ 40%", "目標曝險": 33, "位階": "Tier 3 (主跌)"},
     {"MDD區間": "40% ~ 50%", "目標曝險": 40, "位階": "Tier 4 (恐慌)"},
@@ -119,7 +123,6 @@ if mdd_pct < 5.0:
     target_attack_ratio = base_exposure
     current_tier_index = 0
 elif mdd_pct < 10.0:
-    # 這裡邏輯：如果 MDD 在 5-10%，通常目標是 28%，但如果您的基準已經調高到 29%，那就要取 max
     target_attack_ratio = max(28.0, base_exposure) 
     current_tier_index = 1
 elif mdd_pct < 25.0:
@@ -173,15 +176,11 @@ threshold = 3.0
 
 # --- 4. 儀表板顯示區 ---
 
-# === 標題 ===
-st.title("🛡️ 全天候動態曝險戰情室 (v7.0)")
-st.caption("核心：自動 ATH + 動態基準 (Ratchet Rule) + 閥值再平衡")
-
-# === 區塊一：戰略位階地圖 ===
-st.header("1. 動態戰略地圖")
+# === 區塊一：戰略位階地圖 (已移除原有的標題介面) ===
+st.subheader("1. 動態戰略地圖")
 
 m1, m2, m3 = st.columns([1, 1, 2])
-m1.metric("📉 目前大盤 MDD", f"-{mdd_pct:.2f}%", help="距離自動抓取的 ATH 跌幅")
+m1.metric("📉 目前大盤 MDD", f"-{mdd_pct:.2f}%", help=f"計算基準 ATH: {final_ath:,.0f}")
 m2.metric("🎯 當前目標曝險", f"{target_attack_ratio:.0f}%", help=f"位階: {current_tier_name}")
 
 # 高亮目前的階梯表
@@ -200,7 +199,7 @@ with m3:
 st.divider()
 
 # === 區塊二：投資組合核心數據 ===
-st.header("2. 投資組合核心數據")
+st.subheader("2. 投資組合核心數據")
 
 col1, col2, col3, col4 = st.columns(4)
 
@@ -228,11 +227,11 @@ col4.metric("💳 質押負債比 (U)", f"{loan_ratio:.1f}%", delta="安全線 <
 st.divider()
 
 # === 區塊三：閥值再平衡與甜甜圈圖 ===
-st.header("3. 資產配置與指令")
+st.subheader("3. 資產配置與指令")
 c1, c2 = st.columns([2, 1])
 
 with c1:
-    st.subheader("資產配置佔比 (甜甜圈圖)")
+    st.markdown("**資產配置佔比**")
     
     chart_data = pd.DataFrame({
         '資產類別': ['攻擊型 (正二)', '核心 (00662)', '防禦 (00713)', '子彈庫 (債券)'],
@@ -256,12 +255,12 @@ with c1:
     )
     
     fig.update_traces(textposition='inside', textinfo='percent+label')
-    fig.update_layout(showlegend=False, margin=dict(t=20, b=20, l=20, r=20))
+    fig.update_layout(showlegend=False, margin=dict(t=10, b=10, l=10, r=10), height=300)
     
     st.plotly_chart(fig, use_container_width=True)
 
 with c2:
-    st.subheader("🤖 AI 戰略指令")
+    st.markdown("**AI 戰略指令**")
     
     # 風控
     is_safe_t = maintenance_ratio >= 300
