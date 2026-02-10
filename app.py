@@ -1,17 +1,20 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 
-# --- 1. 頁面基礎設定 ---
+# --- 頁面設定 ---
 st.set_page_config(page_title="全天候動態曝險戰情室", layout="wide")
 
-# --- 2. 側邊欄輸入區 ---
+# --- 標題區 ---
+st.title("🛡️ 階梯式動態曝險系統 (Beta 1.0~1.2)")
+st.caption("核心策略：MDD 階梯式加碼 + 閥值再平衡 (+/- 3%)")
+
+# --- 側邊欄：輸入區 ---
 with st.sidebar:
     st.header("📝 每日監控數據輸入")
     
-    # A. 市場數據 (計算 MDD 用)
-    with st.expander("0. 市場位階設定 (MDD)", expanded=True):
-        st.caption("輸入大盤點數以定位戰略階梯")
+    # 1. 市場數據 (用於自動決定目標比例)
+    with st.expander("0. 市場位階 (計算 MDD)", expanded=True):
+        st.caption("輸入大盤點數以決定目標曝險 %")
         current_index = st.number_input("今日大盤收盤點數", value=31346.0, step=10.0, format="%.1f")
         ath_index = st.number_input("歷史最高點數 (ATH)", value=32996.0, step=10.0, format="%.1f")
         
@@ -20,79 +23,58 @@ with st.sidebar:
             mdd_pct = ((ath_index - current_index) / ath_index) * 100
         else:
             mdd_pct = 0.0
-            
-    # B. 資產數據輸入
+        
+        st.info(f"📉 目前 MDD: -{mdd_pct:.2f}%")
+
+    # 2. 攻擊型資產
     with st.expander("1. 攻擊型資產 (正二)", expanded=True):
-        st.caption("Beta 設定: 台股正二 1.6 / 美股正二 2.0")
+        st.caption("Beta: 台股 1.6 / 美股 2.0")
         col_a1, col_a2 = st.columns(2)
-        p_675 = col_a1.number_input("00675L 價格", value=180.0, step=0.1)
+        p_675 = col_a1.number_input("00675L 價格", value=185.00, step=0.1)
         s_675 = col_a2.number_input("00675L 股數", value=11000, step=1000)
         
         col_b1, col_b2 = st.columns(2)
-        p_631 = col_b1.number_input("00631L 價格", value=453.75, step=0.1)
+        p_631 = col_b1.number_input("00631L 價格", value=466.70, step=0.1)
         s_631 = col_b2.number_input("00631L 股數", value=331, step=100)
         
         col_c1, col_c2 = st.columns(2)
-        p_670 = col_c1.number_input("00670L 價格", value=157.1, step=0.1)
+        p_670 = col_c1.number_input("00670L 價格", value=157.95, step=0.1)
         s_670 = col_c2.number_input("00670L 股數", value=616, step=100)
 
+    # 3. 核心資產
     with st.expander("2. 核心資產 (美股)", expanded=True):
-        st.caption("Beta 設定: 1.0")
+        st.caption("Beta: 1.0")
         col_d1, col_d2 = st.columns(2)
-        p_662 = col_d1.number_input("00662 價格", value=102.1, step=0.1)
+        p_662 = col_d1.number_input("00662 價格", value=102.25, step=0.1)
         s_662 = col_d2.number_input("00662 股數", value=25840, step=100)
 
+    # 4. 防禦資產
     with st.expander("3. 防禦資產 (現金流)", expanded=True):
-        st.caption("Beta 設定: 0.6")
+        st.caption("Beta: 0.6")
         col_e1, col_e2 = st.columns(2)
-        p_713 = col_e1.number_input("00713 價格", value=51.95, step=0.05)
+        p_713 = col_e1.number_input("00713 價格", value=52.10, step=0.05)
         s_713 = col_e2.number_input("00713 股數", value=66000, step=1000)
 
-    with st.expander("4. 子彈庫 (國庫券/債券)", expanded=True):
-        st.caption("Beta 設定: 0.0 (若已剔除 00948B 請填 0)")
+    # 5. 子彈庫
+    with st.expander("4. 子彈庫 (債券)", expanded=True):
+        st.caption("Beta: 0.0 / -0.1")
         col_f1, col_f2 = st.columns(2)
-        p_865 = col_f1.number_input("00865B 價格", value=47.57, step=0.01)
+        p_865 = col_f1.number_input("00865B 價格", value=47.51, step=0.01)
         s_865 = col_f2.number_input("00865B 股數", value=10000, step=1000)
         
         col_g1, col_g2 = st.columns(2)
-        p_948 = col_g1.number_input("00948B 價格", value=9.64, step=0.01)
+        p_948 = col_g1.number_input("00948B 價格", value=9.63, step=0.01)
         s_948 = col_g2.number_input("00948B 股數", value=50000, step=1000)
 
+    # 6. 負債
     st.subheader("5. 負債監控")
     loan_amount = st.number_input("目前質押借款總額 (O)", value=2350000, step=10000)
+    
+    st.info("💡 數據輸入完畢後，右側儀表板會自動運算")
 
-# --- 3. 邏輯運算引擎 ---
+# --- 核心運算引擎 ---
 
-# A. 定義階梯策略表
-ladder_data = [
-    {"MDD區間": "< 5% (高位)", "目標曝險": 23, "位階": "Tier 1"},
-    {"MDD區間": "5% ~ 10%", "目標曝險": 23, "位階": "Tier 1 (警戒)"}, 
-    {"MDD區間": "10% ~ 25%", "目標曝險": 28, "位階": "Tier 2 (初跌)"},
-    {"MDD區間": "25% ~ 40%", "目標曝險": 33, "位階": "Tier 3 (主跌)"},
-    {"MDD區間": "40% ~ 50%", "目標曝險": 40, "位階": "Tier 4 (恐慌)"},
-    {"MDD區間": "> 50%", "目標曝險": 50, "位階": "Tier 5 (毀滅)"},
-]
-
-# B. 判定目前位階
-target_attack_ratio = 23.0 
-current_tier_index = 0
-
-if mdd_pct < 5.0:
-    target_attack_ratio, current_tier_index = 23.0, 0
-elif mdd_pct < 10.0:
-    target_attack_ratio, current_tier_index = 23.0, 1
-elif mdd_pct < 25.0:
-    target_attack_ratio, current_tier_index = 28.0, 2
-elif mdd_pct < 40.0:
-    target_attack_ratio, current_tier_index = 33.0, 3
-elif mdd_pct < 50.0:
-    target_attack_ratio, current_tier_index = 40.0, 4
-else:
-    target_attack_ratio, current_tier_index = 50.0, 5
-
-current_tier_name = ladder_data[current_tier_index]["位階"]
-
-# C. 計算資產數據
+# 1. 計算個別市值
 v_675 = p_675 * s_675
 v_631 = p_631 * s_631
 v_670 = p_670 * s_670
@@ -101,160 +83,134 @@ v_713 = p_713 * s_713
 v_865 = p_865 * s_865
 v_948 = p_948 * s_948
 
+# 2. 類別市值彙整
 val_attack = v_675 + v_631 + v_670
 val_core = v_662
 val_defense = v_713
 val_ammo = v_865 + v_948
 
+# 3. 總資產與淨值
 total_assets = val_attack + val_core + val_defense + val_ammo
 net_assets = total_assets - loan_amount
 
-# D. 計算 Beta
+# 4. Beta 貢獻值計算 (依據您提供的圖片定義)
+# 00675L/631L: 1.60, 00670L: 2.00, 00662: 1.00, 00713: 0.60, 00865B: 0.00, 00948B: -0.10
 beta_weighted_sum = (
-    (v_675 * 1.60) + (v_631 * 1.60) + (v_670 * 2.00) +
-    (v_713 * 0.60) + (v_662 * 1.00) +
-    (v_865 * 0.00) + (v_948 * -0.10)
+    (v_675 * 1.60) +
+    (v_631 * 1.60) +
+    (v_670 * 2.00) +
+    (v_662 * 1.00) +
+    (v_713 * 0.60) +
+    (v_865 * 0.00) +
+    (v_948 * -0.10)
 )
 portfolio_beta = beta_weighted_sum / total_assets if total_assets > 0 else 0
 
-# E. 關鍵比率
+# 5. 關鍵比率計算
 maintenance_ratio = (total_assets / loan_amount) * 100 if loan_amount > 0 else 999
 loan_ratio = (loan_amount / total_assets) * 100 if total_assets > 0 else 0
 current_attack_ratio = (val_attack / total_assets) * 100 if total_assets > 0 else 0
 
-# F. 再平衡計算
+# 6. 決定「目標攻擊曝險 %」 (動態階梯邏輯)
+# 邏輯來源：MDD < 10% -> 23% | 10-25% -> 28% | 25-40% -> 33% | >40% -> 40%~50%
+if mdd_pct < 10.0:
+    target_attack_ratio = 23.0
+    tier_status = "🟢 高位震盪區 (基準 23%)"
+elif mdd_pct < 25.0:
+    target_attack_ratio = 28.0
+    tier_status = "🟡 初跌段 (加碼至 28%)"
+elif mdd_pct < 40.0:
+    target_attack_ratio = 33.0
+    tier_status = "🟠 主跌段 (加碼至 33%)"
+else:
+    target_attack_ratio = 40.0
+    tier_status = "🔴 恐慌區 (加碼至 40%+)"
+
+# 7. 閥值再平衡計算
 gap = current_attack_ratio - target_attack_ratio
-threshold = 3.0
+threshold = 3.0 # 您設定的 +/- 3%
 
-# --- 4. 儀表板顯示區 ---
+# --- 儀表板顯示區 ---
 
-# === 標題 ===
-st.title("🛡️ 全天候動態曝險戰情室 (v5.0)")
-st.caption("目標：Beta 1.05~1.2 | 核心：MDD 階梯加碼 + 雙重風控 (T>300%, U<35%)")
-
-# === 區塊一：戰略位階地圖 ===
-st.header("1. 動態戰略地圖")
-
-m1, m2, m3 = st.columns([1, 1, 2])
-m1.metric("📉 目前大盤 MDD", f"-{mdd_pct:.2f}%", help="距離歷史高點跌幅")
-m2.metric("🎯 當前目標曝險", f"{target_attack_ratio:.0f}%", help=f"位階: {current_tier_name}")
-
-# 高亮目前的階梯表
-df_ladder = pd.DataFrame(ladder_data)
-def highlight_current_row(row):
-    color = '#ffcccc' if row['位階'] == current_tier_name else ''
-    return [f'background-color: {color}' for _ in row]
-
-with m3:
-    st.dataframe(
-        df_ladder.style.apply(highlight_current_row, axis=1),
-        hide_index=True,
-        use_container_width=True
-    )
-
-st.divider()
-
-# === 區塊二：投資組合核心數據 ===
-st.header("2. 投資組合核心數據")
-
+# === 第一排：核心財務指標 ===
 col1, col2, col3, col4 = st.columns(4)
 
 col1.metric("💰 資產總市值 (I)", f"${total_assets:,.0f}", delta=f"淨值: ${net_assets:,.0f}")
-col2.metric("📉 整體 Beta 值", f"{portfolio_beta:.2f}", delta="目標: 1.05 ~ 1.20", delta_color="off")
+col2.metric("📉 整體 Beta 值", f"{portfolio_beta:.2f}", delta="目標: 1.0 ~ 1.2", delta_color="off")
 
-# 維持率顏色邏輯 (加入 300% 警戒線)
-t_val = f"{maintenance_ratio:.0f}%"
-t_delta = "安全線 > 300%"
+# 維持率警示顏色
 t_color = "normal"
+if maintenance_ratio < 250: t_color = "inverse"
+col3.metric("🛡️ 整戶維持率 (T)", f"{maintenance_ratio:.0f}%", delta="安全線 > 250%", delta_color=t_color)
 
-if maintenance_ratio < 250:
-    t_color = "inverse" # 紅色
-    t_delta = "⛔ 已破 250% (斷頭警戒)"
-elif maintenance_ratio < 300:
-    t_color = "inverse" # 紅色
-    t_delta = "⚠️ 未達 300% 安全值"
-
-col3.metric("🛡️ 整戶維持率 (T)", t_val, delta=t_delta, delta_color=t_color)
-
-# 負債比顏色邏輯
-u_color = "inverse" if loan_ratio > 35 else "normal"
-col4.metric("💳 質押負債比 (U)", f"{loan_ratio:.1f}%", delta="安全線 < 35%", delta_color=u_color)
+# 負債比警示顏色
+l_color = "normal"
+if loan_ratio > 35: l_color = "inverse"
+col4.metric("💳 質押負債比 (U)", f"{loan_ratio:.1f}%", delta="安全線 < 35%", delta_color=l_color)
 
 st.divider()
 
-# === 區塊三：視覺化與指令 ===
-st.header("3. 執行監控與指令")
+# === 第二排：閥值再平衡監控 (核心功能) ===
+st.subheader("⚖️ 閥值再平衡監控 (Rebalancing Monitor)")
+
+# 顯示目前的位階狀態
+st.info(f"📍 目前市場位階：**{tier_status}** (MDD: -{mdd_pct:.2f}%)")
+
+m1, m2, m3, m4 = st.columns(4)
+
+m1.metric("⚡ 即時攻擊比例", f"{current_attack_ratio:.2f}%")
+m2.metric("🎯 目標攻擊比例", f"{target_attack_ratio:.0f}%", help="依據 MDD 自動調整")
+
+# 偏離度 (Gap)
+gap_color = "off"
+if abs(gap) > threshold: gap_color = "inverse" # 超過 3% 亮紅燈
+m3.metric("📏 偏離度 (Gap)", f"{gap:+.2f}%", delta=f"容許範圍 +/- {threshold}%", delta_color=gap_color)
+
+# 動作建議 (Action)
+action_text = "HOLD (持有)"
+action_color = "gray"
+if gap > threshold:
+    action_text = "SELL (賣出)"
+    action_color = "red"
+elif gap < -threshold:
+    action_text = "BUY (買進)"
+    action_color = "green"
+
+m4.markdown(f"""
+    <div style="text-align: center;">
+        <p style="margin-bottom: 0px; color: gray;">系統指令</p>
+        <h2 style="color: {action_color}; margin-top: 0px;">{action_text}</h2>
+    </div>
+""", unsafe_allow_html=True)
+
+# 顯示具體的買賣建議金額
+if gap > threshold:
+    sell_amount = val_attack - (total_assets * target_attack_ratio / 100)
+    st.warning(f"🔴 **觸發賣出訊號！** 攻擊比例過高。\n\n建議操作：賣出約 **${sell_amount:,.0f}** 的正二資產，轉入子彈庫。")
+elif gap < -threshold:
+    buy_amount = (total_assets * target_attack_ratio / 100) - val_attack
+    st.success(f"🟢 **觸發買進訊號！** 攻擊比例過低。\n\n建議操作：動用子彈庫約 **${buy_amount:,.0f}**，買進正二資產。")
+else:
+    st.success("✅ **系統平衡中**。無需操作，讓複利奔跑。")
+
+st.divider()
+
+# === 第三排：資產分布視覺化 ===
 c1, c2 = st.columns([2, 1])
 
 with c1:
-    st.subheader("資產配置佔比 (Pie Chart)")
-    
-    # 準備圓餅圖資料
+    st.subheader("資產配置分布")
     chart_data = pd.DataFrame({
-        '資產類別': ['攻擊型 (正二)', '核心 (00662)', '防禦 (00713)', '子彈庫 (債券)'],
+        '類別': ['攻擊型 (正二)', '核心 (00662)', '防禦 (00713)', '子彈庫 (債券)'],
         '市值': [val_attack, val_core, val_defense, val_ammo]
     })
-    
-    # 使用 Plotly 繪製圓餅圖 (甜甜圈圖)
-    fig = px.pie(chart_data, values='市值', names='資產類別', 
-                 color='資產類別',
-                 color_discrete_map={
-                     '攻擊型 (正二)':'#FF4B4B',  # 紅色
-                     '核心 (00662)':'#FFD700',   # 金色
-                     '防禦 (00713)':'#90EE90',   # 綠色
-                     '子彈庫 (債券)':'#87CEFA'   # 藍色
-                 },
-                 hole=0.4)
-    
-    fig.update_traces(textposition='inside', textinfo='percent+label')
-    fig.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
-    st.plotly_chart(fig, use_container_width=True)
+    st.bar_chart(chart_data, x='類別', y='市值', color="#FF4B4B")
 
 with c2:
-    st.subheader("🤖 AI 戰略指令")
-    
-    # --- 雙重風控邏輯 ---
-    is_safe_t = maintenance_ratio >= 300
-    is_safe_u = loan_ratio <= 35
-    
-    risk_msgs = []
-    if not is_safe_t: risk_msgs.append(f"⚠️ 維持率 ({maintenance_ratio:.0f}%) 低於 300% 安全值")
-    if not is_safe_u: risk_msgs.append(f"⚠️ 負債比 ({loan_ratio:.1f}%) 高於 35% 安全線")
-
-    # 1. 紅色警戒 (CRITICAL)
-    if maintenance_ratio < 250:
-        st.error("⛔ **紅色警戒 (CRITICAL)**\n\n維持率低於 250%！\n\n**強制指令：**\n1. 絕對禁止買進。\n2. 立即賣出債券/核心資產償還質押。")
-
-    # 2. 黃色警戒 (CAUTION)
-    elif len(risk_msgs) > 0:
-        risk_text = "\n".join(risk_msgs)
-        st.warning(f"🟠 **風險提示 (Caution)**\n\n{risk_text}\n\n**指令：**\n財務結構不夠健康，禁止大幅加碼。\n若攻擊佔比過高，應優先賣出還債。")
-        
-        # 風險狀態下的減壓機會
-        if gap > threshold:
-             sell_amt = val_attack - (total_assets * target_attack_ratio / 100)
-             st.info(f"💡 **減壓機會**：攻擊佔比過高，建議賣出 ${sell_amt:,.0f} 正二償還負債！")
-
-    # 3. 綠色安全 (SAFE)
-    else:
-        # 只有在安全狀態下，才允許執行「再平衡」
-        if gap > threshold:
-            sell_amt = val_attack - (total_assets * target_attack_ratio / 100)
-            st.warning(f"🔴 **賣出訊號 (Take Profit)**\n\n攻擊佔比過高 (+{gap:.1f}%)。\n\n**執行動作：**\n賣出 ${sell_amt:,.0f} 轉入子彈庫。")
-            
-        elif gap < -threshold:
-            buy_amt = (total_assets * target_attack_ratio / 100) - val_attack
-            st.success(f"🟢 **買進訊號 (Buy the Dip)**\n\n攻擊佔比過低 ({gap:.1f}%)。\n\n**執行動作：**\n動用子彈庫 ${buy_amt:,.0f} 買進正二。")
-            
-        else:
-            st.success(f"✅ **系統待機 (Perfect)**\n\n**狀態完美：**\n1. T > 300% (安全)\n2. U < 35% (健康)\n3. 曝險無偏離\n\n**執行動作：**\n持續持有，讓複利奔跑。")
-
-st.markdown("---")
-with st.expander("查看詳細資產清單"):
-     detail_data = {
-        '代號': ['00675L', '00631L', '00670L', '00662', '00713', '00865B', '00948B'],
-        '類別': ['攻擊', '攻擊', '攻擊', '核心', '防禦', '子彈', '子彈'],
-        'Beta': [1.60, 1.60, 2.00, 1.00, 0.60, 0.00, -0.10],
-        '市值': [v_675, v_631, v_670, v_662, v_713, v_865, v_948]
+    st.subheader("📊 詳細數據表")
+    detail_data = {
+        '代號': ['00675L/631L', '00670L', '00662', '00713', '00865B', '00948B'],
+        '市值': [v_675+v_631, v_670, v_662, v_713, v_865, v_948],
+        'Beta': [1.60, 2.00, 1.00, 0.60, 0.00, -0.10]
     }
-     st.dataframe(pd.DataFrame(detail_data).style.format({"市值": "${:,.0f}", "Beta": "{:.2f}"}))
+    st.dataframe(pd.DataFrame(detail_data).style.format({"市值": "${:,.0f}", "Beta": "{:.2f}"}))
