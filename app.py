@@ -61,10 +61,17 @@ with st.sidebar:
             "目前基準曝險 % (Tier 1)", 
             value=23.0, 
             min_value=20.0, 
-            max_value=40.0, 
+            max_value=30.0, 
             step=1.0,
-            help="此為 <5% 的基準。後續階梯會在此基礎上自動計算 (例如 +5%, +10%)"
+            help="此為 <5% 的基準。範圍 20%~30%。"
         )
+        
+        # 【修正點】計算目前的位階 (邏輯：20%是0, 21%是+1... 因此公式為 基準-20)
+        ratchet_level = int(base_exposure - 20)
+        
+        # 顯示位階提示 (正數加號，0不加)
+        level_sign = "+" if ratchet_level > 0 else ""
+        st.caption(f"ℹ️ 目前位階: {level_sign}{ratchet_level}")
 
     # B. 資產數據輸入
     with st.expander("1. 攻擊型資產 (正二)", expanded=True):
@@ -104,14 +111,13 @@ with st.sidebar:
 
 # --- 3. 邏輯運算引擎 ---
 
-# A. 定義階梯策略表 (依據您的新要求)
-# Base = 23 (假設)
-tier_0 = base_exposure          # < 5%  (Ex: 23%)
-tier_1 = base_exposure + 5.0    # 5-10% (Ex: 28%)
-tier_2 = base_exposure + 5.0    # 10-20% (Ex: 28%)
-tier_3 = base_exposure + 10.0   # 20-35% (Ex: 33%)
-tier_4 = base_exposure + 15.0   # 35-45% (Ex: 38%)
-tier_5 = base_exposure + 20.0   # > 45% (Ex: 43%)
+# A. 定義階梯策略表 (客製化間距)
+tier_0 = base_exposure          # < 5%
+tier_1 = base_exposure + 5.0    # 5-10% (+5%)
+tier_2 = base_exposure + 5.0    # 10-20% (+5%)
+tier_3 = base_exposure + 10.0   # 20-35% (+10%)
+tier_4 = base_exposure + 15.0   # 35-45% (+15%)
+tier_5 = base_exposure + 20.0   # > 45% (+20%)
 
 ladder_data = [
     {"MDD區間": "< 5% (高位)", "目標曝險": tier_0, "位階": "Tier 1 (基準)"},
@@ -197,7 +203,10 @@ def highlight_current_row(row):
     return [f'background-color: {color}' for _ in row]
 
 with m3:
-    st.caption(f"ℹ️ 客製化階梯：依據 Base {base_exposure:.0f}% 進行動態推算")
+    # 顯示格式化後的位階 (例如: +3位階)
+    level_str = f"+{ratchet_level}" if ratchet_level > 0 else f"{ratchet_level}"
+    st.caption(f"ℹ️ {level_str}位階動態曝險 (基準: {base_exposure:.0f}%)")
+    
     st.dataframe(
         df_ladder.style
         .apply(highlight_current_row, axis=1)
