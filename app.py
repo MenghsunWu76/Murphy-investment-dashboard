@@ -7,7 +7,7 @@ from datetime import datetime
 import pytz
 
 # --- 1. 頁面基礎設定 ---
-st.set_page_config(page_title="全天候戰情室 (v11.0 凱利雙引擎版)", layout="wide")
+st.set_page_config(page_title="全天候戰情室 (v13.0 智動版)", layout="wide")
 
 # --- 2. 歷史紀錄系統 (CSV) ---
 HISTORY_FILE = "asset_history.csv"
@@ -32,17 +32,28 @@ def save_record(data_dict):
         except:
             new_df.to_csv(HISTORY_FILE, mode='a', header=False, index=False)
 
-# --- 3. 自動抓取 ATH 引擎 ---
+# --- 3. 自動抓取引擎 (ATH & 0050 PE) ---
 @st.cache_data(ttl=3600)
-def get_ath_data():
+def get_market_data():
+    data = {"ath": 32996.0, "pe_0050": None}
     try:
+        # 抓取 ATH
         hist = yf.Ticker("^TWII").history(period="5y")
-        if not hist.empty: return float(hist['High'].max())
-    except: pass
-    return 32996.0
+        if not hist.empty: 
+            data["ath"] = float(hist['High'].max())
+        
+        # [New] 抓取 0050 P/E 作為參考
+        etf_50 = yf.Ticker("0050.TW")
+        if 'trailingPE' in etf_50.info:
+            data["pe_0050"] = etf_50.info['trailingPE']
+    except: 
+        pass
+    return data
 
-with st.spinner('正在連線計算歷史高點 (ATH)...'):
-    ath_auto = get_ath_data()
+with st.spinner('正在連線抓取市場數據 (ATH & 參考P/E)...'):
+    market_data = get_market_data()
+    ath_auto = market_data["ath"]
+    pe_0050_ref = market_data["pe_0050"]
 
 # --- 4. 初始化 Session State ---
 def init_state(key, default_value):
@@ -52,7 +63,7 @@ def init_state(key, default_value):
 init_state('manual_ath_check', False)
 init_state('input_ath', ath_auto)
 init_state('input_index', 31346.0)
-init_state('input_pe', 26.5) # [Updated] 預設值改為接近目前水位
+init_state('input_pe', 26.5)
 
 # 資產預設值
 defaults = {
@@ -79,7 +90,6 @@ with st.sidebar:
                 st.session_state['input_ath'] = float(last_data['ATH'])
                 st.session_state['manual_ath_check'] = True 
                 
-                # 載入 P/E
                 if 'PE_Ratio' in last_data:
                     st.session_state['input_pe'] = float(last_data['PE_Ratio'])
 
@@ -111,58 +121,63 @@ with st.sidebar:
         mdd_pct = ((final_ath - current_index) / final_ath) * 100 if final_ath > 0 else 0.0
         st.info(f"📉 目前 MDD: {mdd_pct:.2f}% (ATH: {final_ath:,.0f})")
         
-        # [New] P/E 凱利槓桿決策模組
+        # [New] 凱利 P/E 模組 (含自動參考 & 官方連結)
         st.caption("---")
-        st.caption("💎 價值濾網 (Kelly Criterion)")
-        pe_val = st.number_input("目前大盤本益比 (P/E)", step=0.1, key="input_pe", help="輸入台股加權指數本益比")
+        st.caption("🎯 戰術濾網 (Beta & P/E)")
         
-        # 凱利公式邏輯對照表
-        kelly_base = 20.0
-        kelly_lev = "160%"
-        kelly_msg = "防禦 (Defense)"
-        kelly_color = "red" # red, orange, green, blue
+        # 顯示 0050 參考值
+        if pe_0050_ref:
+            st.metric("📊 0050 P/E (參考)", f"{pe_0050_ref:.2f}", help="利用 0050 作為大盤近似值參考")
+        else:
+            st.caption("⚠️ 無法抓取 0050 P/E")
 
-        if pe_val >= 25.0:
-            kelly_base = 20.0
-            kelly_lev = "160%"
-            kelly_msg = "🔴 超限減碼 (Extreme Defense)"
-            kelly_color = "red"
-        elif pe_val >= 23.0:
-            kelly_base = 23.0
-            kelly_lev = "200%"
-            kelly_msg = "🟠 警戒區 (Caution)"
-            kelly_color = "orange"
+        # 官方連結按鈕
+        st.link_button("🔗 點此查詢證交所最新 P/E", "https://www.twse.com.tw/zh/page/trading/exchange/BWIBBU_d.html")
+
+        pe_val = st.number_input("輸入大盤本益比 (P/E)", step=0.1, key="input_pe", help="請輸入證交所官方數據以求精確")
+        
+        # P/E 決定 Beta 與 Base Tier
+        rec_beta = 1.6
+        rec_base = 20.0
+        rec_msg = "🛡️ 防禦 (Defense)"
+        rec_color = "red"
+
+        if pe_val >= 24.0:
+            rec_beta = 1.6
+            rec_base = 20.0
+            rec_msg = "🛡️ 防禦 (Defense)"
+            rec_color = "red"
         elif pe_val >= 21.0:
-            kelly_base = 25.0
-            kelly_lev = "240%"
-            kelly_msg = "🟢 加碼區 (Accumulate)"
-            kelly_color = "green"
-        elif pe_val >= 19.0:
-            kelly_base = 28.0
-            kelly_lev = "280%"
-            kelly_msg = "💎 重倉區 (Aggressive)"
-            kelly_color = "blue"
+            rec_beta = 2.0
+            rec_base = 23.0
+            rec_msg = "⚖️ 標準 (Standard)"
+            rec_color = "orange"
+        elif pe_val >= 18.0:
+            rec_beta = 2.5
+            rec_base = 25.0
+            rec_msg = "⚔️ 進攻 (Attack)"
+            rec_color = "green"
         else:
-            kelly_base = 30.0
-            kelly_lev = "320%"
-            kelly_msg = "🚀 滿積區 (All-in)"
-            kelly_color = "violet"
+            rec_beta = 3.0
+            rec_base = 30.0
+            rec_msg = "🚀 全速 (Full Speed)"
+            rec_color = "blue"
 
-        if kelly_color == "red":
-            st.error(f"{kelly_msg}\n\n建議槓桿: {kelly_lev}\n建議基準: {kelly_base:.0f}%")
-        elif kelly_color == "orange":
-            st.warning(f"{kelly_msg}\n\n建議槓桿: {kelly_lev}\n建議基準: {kelly_base:.0f}%")
-        elif kelly_color == "green":
-            st.success(f"{kelly_msg}\n\n建議槓桿: {kelly_lev}\n建議基準: {kelly_base:.0f}%")
+        # 顯示建議
+        if rec_color == "red":
+            st.error(f"{rec_msg}\n\n建議 Beta: < {rec_beta}\n建議基準: {rec_base:.0f}%")
+        elif rec_color == "orange":
+            st.warning(f"{rec_msg}\n\n建議 Beta: ~ {rec_beta}\n建議基準: {rec_base:.0f}%")
+        elif rec_color == "green":
+            st.success(f"{rec_msg}\n\n建議 Beta: > {rec_beta}\n建議基準: {rec_base:.0f}%")
         else:
-            st.info(f"{kelly_msg}\n\n建議槓桿: {kelly_lev}\n建議基準: {kelly_base:.0f}%")
+            st.info(f"{rec_msg}\n\n建議 Beta: {rec_beta}+\n建議基準: {rec_base:.0f}%")
 
         # 基準曝險輸入
         base_exposure = st.number_input("目前基準曝險 % (Tier 1)", value=23.0, min_value=20.0, max_value=30.0, step=1.0)
         
-        # 防呆警告：如果設定比建議值高
-        if base_exposure > kelly_base:
-            st.caption(f"⚠️ **風險提示**：目前設定 ({base_exposure}%) 高於 P/E 建議值 ({kelly_base:.0f}%)，請留意追高風險！")
+        if base_exposure > rec_base:
+             st.caption(f"⚠️ **注意**：設定 ({base_exposure}%) 高於建議值 ({rec_base:.0f}%)！")
 
         ratchet_level = int(base_exposure - 20)
         level_sign = "+" if ratchet_level > 0 else ""
@@ -272,10 +287,8 @@ with st.sidebar:
             "Current_Index": current_index,
             "ATH": final_ath,
             "PE_Ratio": pe_val,
-            # 股價 (P)
             "P_00675": p_675, "P_00631": p_631, "P_00670": p_670,
             "P_00662": p_662, "P_00713": p_713, "P_00865": p_865,
-            # 股數 (S)
             "S_00675": s_675, "S_00631": s_631, "S_00670": s_670,
             "S_00662": s_662, "S_00713": s_713, "S_00865": s_865
         }
@@ -317,7 +330,12 @@ with tab1:
     st.subheader("2. 投資組合核心數據")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("💰 資產總市值 (I)", f"${total_assets:,.0f}", delta=f"${diff_total:,.0f} (vs 上次)", help=f"上次紀錄時間: {last_date_str}")
-    col2.metric("📉 整體 Beta 值", f"{portfolio_beta:.2f}", delta="目標: 1.05 ~ 1.20", delta_color="off")
+    
+    beta_delta_color = "off"
+    if portfolio_beta > rec_beta: beta_delta_color = "inverse"
+    elif portfolio_beta < rec_beta - 0.5: beta_delta_color = "normal"
+    
+    col2.metric("📉 整體 Beta 值", f"{portfolio_beta:.2f}", delta=f"建議: {rec_beta} ({rec_msg})", delta_color=beta_delta_color)
     
     t_color = "normal"
     if maintenance_ratio < 250: t_color = "inverse"
@@ -387,26 +405,22 @@ with tab2:
     st.markdown("""
     1.  **資料更新 (Data Check)**
         * 點擊 **「📂 載入上次存檔數據」**。
-        * **[關鍵]** 輸入 **「目前大盤本益比 (P/E)」**，系統將自動計算凱利最佳槓桿。
-        * **[調整]** 根據系統建議，手動調整 **「基準曝險 (Tier 1)」** 水位。
-        * 確認 `ATH`、`股數` 與 `質押金額`。
-    2.  **決策執行 (Decision)**
-        * 若 P/E 顯示 **🔴 超限減碼**：請確保基準已降至 20%，並考慮去槓桿。
-        * 若 P/E 顯示 **💎 重倉區**：可考慮提高基準至 28%-30%。
-    3.  **存檔記錄 (Archive)**
+        * 查看 **「0050 P/E (參考)」**，或點擊 **「🔗 連結」** 查詢證交所官方數據。
+        * 將確認後的 P/E 填入輸入框，系統將自動建議 Beta 水位。
+        * 更新股數與質押金額。
+    2.  **儀表板判讀**
+        * 檢查 **「整體 Beta 值」** 與建議值的落差。
+        * 檢查 **「紅綠燈訊號」** 執行買賣。
+    3.  **存檔記錄**
         * 點擊 **「💾 儲存今日資產紀錄」**。
     """)
     st.divider()
     st.subheader("🔍 核心指標深度解讀")
-    with st.expander("1. 凱利公式 (Kelly Criterion) - 槓桿導航"):
+    with st.expander("1. Beta (波動係數) & P/E 濾網"):
         st.markdown("""
-        * **原理**：依據勝率 (P/E 估值) 決定下注大小 (槓桿率)。
-        * **區間對照**：
-            * **P/E > 25.0**：勝率低 -> **槓桿 160% (Base 20%)** -> 防守。
-            * **P/E 23~25**：勝率普通 -> **槓桿 200% (Base 23%)** -> 標準。
-            * **P/E 21~23**：勝率高 -> **槓桿 240% (Base 25%)** -> 進攻。
-            * **P/E < 19**：勝率極高 -> **槓桿 280%+ (Base 30%)** -> 全力進攻。
+        * **P/E (路況)** > 24 (貴) -> **Beta (車速)** < 1.6。
+        * **P/E (路況)** < 18 (俗) -> **Beta (車速)** > 2.5。
         """)
-    with st.expander("2. MDD (最大回檔)"): st.write("目前大盤指數距離歷史最高點 (ATH) 的跌幅。")
-    with st.expander("3. Gap (偏離度)"): st.write("目前攻擊曝險 - 目標攻擊曝險。")
-    with st.expander("4. T值 (維持率)"): st.write("總資產 / 負債。低於 250% 為紅燈。")
+    with st.expander("2. MDD (最大回檔)"): st.write("目前大盤跌幅。")
+    with st.expander("3. Gap (偏離度)"): st.write("攻擊曝險與目標的差距，超過 3% 執行再平衡。")
+    with st.expander("4. T值 & U值"): st.write("維持率 > 300%，負債比 < 35%。")
