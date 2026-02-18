@@ -7,7 +7,7 @@ from datetime import datetime
 import pytz
 
 # --- 1. 頁面基礎設定 ---
-st.set_page_config(page_title="全天候戰情室 (MDD核心版)", layout="wide")
+st.set_page_config(page_title="全天候戰情室 (v15.0 槓桿衛士版)", layout="wide")
 
 # --- 2. 歷史紀錄系統 (CSV) ---
 HISTORY_FILE = "asset_history.csv"
@@ -101,8 +101,8 @@ with st.sidebar:
         else:
             st.warning("⚠️ 無紀錄")
 
-    # A. 市場數據 (MDD 核心)
-    with st.expander("0. 市場位階 (MDD Core)", expanded=True):
+    # A. 市場數據 (MDD 核心 + P/E 衛士)
+    with st.expander("0. 市場位階 & 估值", expanded=True):
         col_ath1, col_ath2 = st.columns([2, 1])
         with col_ath1: st.metric("自動 ATH", f"{ath_auto:,.0f}")
         with col_ath2: use_manual_ath = st.checkbox("修正", key="manual_ath_check")
@@ -118,17 +118,26 @@ with st.sidebar:
         mdd_pct = ((final_ath - current_index) / final_ath) * 100 if final_ath > 0 else 0.0
         st.info(f"📉 目前 MDD: {mdd_pct:.2f}%")
         
-        # P/E 僅作參考，不干擾決策
-        pe_val = st.number_input("參考 P/E (選填)", step=0.1, key="input_pe")
-        pe_status = ""
-        if pe_val > 24: pe_status = "⚠️ 偏貴"
-        elif pe_val < 18: pe_status = "💎 便宜"
-        else: pe_status = "✅ 合理"
-        st.caption(f"P/E 狀態: {pe_status} (僅供參考)")
-
-        # 回歸最純粹的 Base Exposure 設定
+        # P/E 輸入與參考
         st.markdown("---")
-        base_exposure = st.number_input("基準曝險 % (Tier 1)", value=23.0, min_value=20.0, max_value=30.0, step=1.0, help="由您決定，不受 P/E 限制")
+        if pe_0050_ref:
+            st.caption(f"參考: 0050 PE {pe_0050_ref:.2f}")
+        st.link_button("🔗 查詢證交所官方 P/E", "https://www.twse.com.tw/zh/page/trading/exchange/BWIBBU_d.html")
+        
+        pe_val = st.number_input("輸入大盤 P/E (決定槓桿上限)", step=0.1, key="input_pe")
+
+        # 計算安全槓桿上限 (依據您的凱利公式圖表)
+        safe_leverage_limit = 160
+        if pe_val < 17.0: safe_leverage_limit = 320
+        elif pe_val < 19.0: safe_leverage_limit = 280
+        elif pe_val < 21.0: safe_leverage_limit = 240
+        elif pe_val < 23.0: safe_leverage_limit = 200
+        else: safe_leverage_limit = 160 # PE > 23 (包含 25, 26.5)
+
+        st.caption(f"🛡️ P/E {pe_val} -> 安全槓桿上限: {safe_leverage_limit}%")
+
+        st.markdown("---")
+        base_exposure = st.number_input("基準曝險 % (Tier 1)", value=23.0, min_value=20.0, max_value=30.0, step=1.0)
         
         ratchet_level = int(base_exposure - 20)
         level_sign = "+" if ratchet_level > 0 else ""
@@ -164,7 +173,34 @@ with st.sidebar:
     st.subheader("5. 負債監控")
     loan_amount = st.number_input("目前質押借款總額 (O)", value=2350000, step=10000)
 
-# --- 6. 運算引擎 (純 MDD 邏輯) ---
+# --- 6. 運算引擎 ---
+# 資產市值
+v_675 = p_675 * s_675
+v_631 = p_631 * s_631
+v_670 = p_670 * s_670
+v_662 = p_662 * s_662
+v_713 = p_713 * s_713
+v_865 = p_865 * s_865
+
+val_attack = v_675 + v_631 + v_670
+val_core = v_662
+val_defense = v_713
+val_ammo = v_865
+total_assets = val_attack + val_core + val_defense + val_ammo
+net_assets = total_assets - loan_amount
+
+# [New] 實質槓桿率計算
+# 正二曝險算 2倍，其他算 1倍
+real_exposure = (val_attack * 2.0) + (val_core * 1.0) + (val_defense * 1.0) + (val_ammo * 1.0)
+real_leverage_ratio = (real_exposure / net_assets) * 100 if net_assets > 0 else 0
+
+# 其他指標
+beta_weighted_sum = ((v_675*1.6) + (v_631*1.6) + (v_670*2.0) + (v_713*0.6) + (v_662*1.0) + (v_865*0.0))
+portfolio_beta = beta_weighted_sum / total_assets if total_assets > 0 else 0
+maintenance_ratio = (total_assets / loan_amount) * 100 if loan_amount > 0 else 999
+loan_ratio = (loan_amount / total_assets) * 100 if total_assets > 0 else 0
+
+# MDD 階梯
 tier_0 = base_exposure
 tier_1 = base_exposure + 5.0
 tier_2 = base_exposure + 5.0
@@ -183,7 +219,6 @@ ladder_data = [
 
 target_attack_ratio = tier_0
 current_tier_index = 0
-
 if mdd_pct < 5.0: target_attack_ratio, current_tier_index = tier_0, 0
 elif mdd_pct < 10.0: target_attack_ratio, current_tier_index = tier_1, 1
 elif mdd_pct < 20.0: target_attack_ratio, current_tier_index = tier_2, 2
@@ -192,25 +227,6 @@ elif mdd_pct < 45.0: target_attack_ratio, current_tier_index = tier_4, 4
 else: target_attack_ratio, current_tier_index = tier_5, 5
 
 current_tier_name = ladder_data[current_tier_index]["位階"]
-
-v_675 = p_675 * s_675
-v_631 = p_631 * s_631
-v_670 = p_670 * s_670
-v_662 = p_662 * s_662
-v_713 = p_713 * s_713
-v_865 = p_865 * s_865
-
-val_attack = v_675 + v_631 + v_670
-val_core = v_662
-val_defense = v_713
-val_ammo = v_865
-total_assets = val_attack + val_core + val_defense + val_ammo
-net_assets = total_assets - loan_amount
-
-beta_weighted_sum = ((v_675*1.6) + (v_631*1.6) + (v_670*2.0) + (v_713*0.6) + (v_662*1.0) + (v_865*0.0))
-portfolio_beta = beta_weighted_sum / total_assets if total_assets > 0 else 0
-maintenance_ratio = (total_assets / loan_amount) * 100 if loan_amount > 0 else 999
-loan_ratio = (loan_amount / total_assets) * 100 if total_assets > 0 else 0
 current_attack_ratio = (val_attack / total_assets) * 100 if total_assets > 0 else 0
 gap = current_attack_ratio - target_attack_ratio
 threshold = 3.0
@@ -272,24 +288,33 @@ with tab1:
         return [f'background-color: {color}' for _ in row]
     
     with m4:
-        # P/E 僅作參考，不顯示建議 Beta
         st.caption(f"ℹ️ 策略引擎: MDD 階梯 (參考 P/E: {pe_val})")
         st.dataframe(df_ladder.style.apply(highlight_current_row, axis=1).format({"目標曝險": "{:.0f}%"}), hide_index=True, use_container_width=True)
 
     st.divider()
 
     st.subheader("2. 投資組合核心數據")
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("💰 資產總市值 (I)", f"${total_assets:,.0f}", delta=f"${diff_total:,.0f} (vs 上次)", help=f"上次紀錄時間: {last_date_str}")
-    col2.metric("📉 整體 Beta 值", f"{portfolio_beta:.2f}", delta="目標: 1.05 ~ 1.20", delta_color="off")
+    # [Updated] 新增第五欄位顯示槓桿率
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("💰 資產總市值 (I)", f"${total_assets:,.0f}", delta=f"${diff_total:,.0f}", help="vs 上次存檔")
+    col2.metric("📉 整體 Beta 值", f"{portfolio_beta:.2f}")
     
+    # 槓桿率判定
+    lev_delta_color = "normal"
+    lev_msg = "✅ 安全"
+    if real_leverage_ratio > safe_leverage_limit:
+        lev_delta_color = "inverse"
+        lev_msg = f"⚠️ 超速 (上限{safe_leverage_limit}%)"
+    
+    col3.metric("⚙️ 實質槓桿率", f"{real_leverage_ratio:.1f}%", delta=lev_msg, delta_color=lev_delta_color, help="公式: 總市場曝險(含正二) / 淨資產")
+
     t_color = "normal"
     if maintenance_ratio < 250: t_color = "inverse"
     elif maintenance_ratio < 300: t_color = "inverse"
-    col3.metric("🛡️ 整戶維持率 (T)", f"{maintenance_ratio:.0f}%", delta="安全線 > 300%", delta_color=t_color)
+    col4.metric("🛡️ 整戶維持率 (T)", f"{maintenance_ratio:.0f}%", delta="安全線 > 300%", delta_color=t_color)
     
     u_color = "inverse" if loan_ratio > 35 else "normal"
-    col4.metric("💳 質押負債比 (U)", f"{loan_ratio:.1f}%", delta="安全線 < 35%", delta_color=u_color)
+    col5.metric("💳 質押負債比 (U)", f"{loan_ratio:.1f}%", delta="安全線 < 35%", delta_color=u_color)
 
     st.divider()
 
@@ -314,12 +339,13 @@ with tab1:
         risk_msgs = []
         if not is_safe_t: risk_msgs.append(f"⚠️ 維持率 ({maintenance_ratio:.0f}%) 低於 300%")
         if not is_safe_u: risk_msgs.append(f"⚠️ 負債比 ({loan_ratio:.1f}%) 高於 35%")
+        if real_leverage_ratio > safe_leverage_limit: risk_msgs.append(f"⚠️ 槓桿 ({real_leverage_ratio:.1f}%) 超過 P/E 安全上限 ({safe_leverage_limit}%)")
 
         if maintenance_ratio < 250:
             st.error("⛔ **紅色警戒**\n\n維持率危險！禁止買進，賣股還債。")
         elif len(risk_msgs) > 0:
             risk_text = "\n".join(risk_msgs)
-            st.warning(f"🟠 **風險提示**\n\n{risk_text}\n\n**指令：**\n財務結構待加強，禁止大幅加碼。")
+            st.warning(f"🟠 **風險提示**\n\n{risk_text}\n\n**指令：**\n風險指標超標，禁止加碼，考慮減碼。")
             if gap > threshold:
                  sell_amt = val_attack - (total_assets * target_attack_ratio / 100)
                  st.info(f"💡 **減壓機會**：賣出 ${sell_amt:,.0f} 正二還債！")
@@ -351,17 +377,30 @@ with tab2:
     st.markdown("""
     1.  **資料更新**
         * 點擊 **「📂 載入上次存檔數據」**。
-        * 確認 ATH 與大盤點數 (主要決策依據)。
-        * 更新 P/E 值 (僅作參考，不影響紅綠燈)。
+        * 輸入 **「P/E」** 與 **「ATH」**。
         * 更新股數與質押金額。
     2.  **儀表板判讀**
-        * **Gap (偏離度)**： +/- 3% 為行動門檻。
-        * **MDD (跌幅)**：決定目標曝險 (Target)。
-    3.  **存檔記錄**
-        * 點擊 **「💾 儲存今日資產紀錄」**。
+        * **Gap**：+/- 3% 再平衡。
+        * **實質槓桿率**：確認是否顯示「✅ 安全」。若顯示「⚠️ 超速」，請優先去槓桿。
+    3.  **存檔**：點擊 **「💾 儲存」**。
     """)
     st.divider()
+    
+    st.subheader("📊 凱利動態槓桿比例表 (P/E 風控)")
+    st.markdown("""
+    | 本益比 (P/E) | 預估指數位置 | 建議安全槓桿率 | 策略動作 |
+    | :--- | :--- | :--- | :--- |
+    | **> 26.5** | 33,600+ | **160%** | **超限減碼**：處於防禦狀態，等待評價回落。 |
+    | **25.0 ~ 26.5** | 31,700 | **160%** | **防禦區**：維持最低槓桿。 |
+    | **23.0 ~ 25.0** | 29,160 | **200%** | **基準區**：回到 2 倍槓桿 (如 100% 現貨 + 100% 借貸/正二)。 |
+    | **21.0 ~ 23.0** | 26,630 | **240%** | **加碼區**：估值進入中值，轉向積極。 |
+    | **19.0 ~ 21.0** | 24,090 | **280%** | **重倉區**：評價進入甜蜜點，大幅擴張風險敞口。 |
+    | **< 17.0** | 21,550 | **320%** | **滿積區**：執行策略上限，全速前進。 |
+    """)
+
+    st.divider()
     st.subheader("🔍 核心指標深度解讀")
-    with st.expander("1. MDD (最大回檔) - 唯一指揮官"): st.write("策略絕對核心。MDD 決定戰場位置 (位階)，進而決定曝險比例。")
-    with st.expander("2. P/E (本益比) - 參考後照鏡"): st.write("僅供參考市場熱度，不強制干預曝險決策。")
-    with st.expander("3. T值 & U值 (生存底線)"): st.write("維持率 > 300%，負債比 < 35%。")
+    with st.expander("1. 實質槓桿率 (Leverage Ratio)"):
+        st.write("公式：`總市場曝險(正二算2倍) / 淨資產`。這是您最真實的曝險倍數。")
+    with st.expander("2. MDD (最大回檔)"): st.write("策略絕對核心。MDD 決定戰場位置 (位階)。")
+    with st.expander("3. T值 & U值"): st.write("維持率 > 300%，負債比 < 35%。")
