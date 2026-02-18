@@ -7,7 +7,7 @@ from datetime import datetime
 import pytz
 
 # --- 1. 頁面基礎設定 ---
-st.set_page_config(page_title="全天候戰情室", layout="wide")
+st.set_page_config(page_title="全天候戰情室 (v10.0 雙引擎版)", layout="wide")
 
 # --- 2. 歷史紀錄系統 (CSV) ---
 HISTORY_FILE = "asset_history.csv"
@@ -52,6 +52,7 @@ def init_state(key, default_value):
 init_state('manual_ath_check', False)
 init_state('input_ath', ath_auto)
 init_state('input_index', 31346.0)
+init_state('input_pe', 22.0) # [New] P/E 預設值
 
 # 資產預設值
 defaults = {
@@ -70,7 +71,7 @@ with st.sidebar:
     st.header("📝 監控數據輸入")
     
     # === 一鍵讀取功能 ===
-    if st.button("📂 載入上次存檔數據", type="secondary", help="點擊後將自動填入上次儲存的股價、股數與大盤點數"):
+    if st.button("📂 載入上次存檔數據", type="secondary", help="點擊後將自動填入上次儲存的股價、股數、P/E與大盤點數"):
         last_data = load_last_record()
         if last_data is not None:
             try:
@@ -78,6 +79,10 @@ with st.sidebar:
                 st.session_state['input_ath'] = float(last_data['ATH'])
                 st.session_state['manual_ath_check'] = True 
                 
+                # [New] 載入 P/E
+                if 'PE_Ratio' in last_data:
+                    st.session_state['input_pe'] = float(last_data['PE_Ratio'])
+
                 for code in ['675', '631', '670', '662', '713', '865']:
                     st.session_state[f'p_{code}'] = float(last_data[f'P_00{code}'])
                     st.session_state[f's_{code}'] = int(last_data[f'S_00{code}'])
@@ -106,6 +111,25 @@ with st.sidebar:
         mdd_pct = ((final_ath - current_index) / final_ath) * 100 if final_ath > 0 else 0.0
         st.info(f"📉 目前 MDD: {mdd_pct:.2f}% (ATH: {final_ath:,.0f})")
         
+        # [New] P/E 估值修正建議
+        st.caption("---")
+        st.caption("💎 估值輔助 (Dual Engine)")
+        pe_val = st.number_input("目前大盤本益比 (P/E)", step=0.1, key="input_pe", help="建議參考證交所或財經網站數據")
+        
+        pe_msg = ""
+        pe_color = "off"
+        if pe_val > 24.0:
+            pe_msg = "⚠️ 昂貴 (建議基準降至 20%)"
+            pe_color = "inverse"
+        elif pe_val < 18.0:
+            pe_msg = "💎 便宜 (建議基準升至 30%)"
+            pe_color = "normal"
+        else:
+            pe_msg = "✅ 合理 (維持標準配置)"
+            pe_color = "off"
+            
+        st.caption(f"訊號: {pe_msg}")
+
         base_exposure = st.number_input("目前基準曝險 % (Tier 1)", value=23.0, min_value=20.0, max_value=30.0, step=1.0)
         ratchet_level = int(base_exposure - 20)
         level_sign = "+" if ratchet_level > 0 else ""
@@ -214,6 +238,7 @@ with st.sidebar:
             "MDD": mdd_pct,
             "Current_Index": current_index,
             "ATH": final_ath,
+            "PE_Ratio": pe_val, # [New] 儲存 P/E
             # 股價 (P)
             "P_00675": p_675, "P_00631": p_631, "P_00670": p_670,
             "P_00662": p_662, "P_00713": p_713, "P_00865": p_865,
@@ -251,7 +276,7 @@ with tab1:
     
     with m4:
         level_str = f"+{ratchet_level}" if ratchet_level > 0 else f"{ratchet_level}"
-        st.caption(f"ℹ️ {level_str}位階動態曝險 (基準: {base_exposure:.0f}%)")
+        st.caption(f"ℹ️ {level_str}位階動態曝險 (P/E: {pe_val})") # 顯示 P/E
         st.dataframe(df_ladder.style.apply(highlight_current_row, axis=1).format({"目標曝險": "{:.0f}%"}), hide_index=True, use_container_width=True)
 
     st.divider()
@@ -327,29 +352,29 @@ with tab2:
     st.title("📖 全天候系統操作指南 (SOP)")
     st.subheader("⚙️ 每日操作流程")
     st.markdown("""
-    1.  **資料更新**
-        * 點擊側邊欄上方的 **「📂 載入上次存檔數據」**。
+    1.  **資料更新 (Data Check)**
+        * 點擊 **「📂 載入上次存檔數據」**，快速還原。
+        * 輸入 **「目前大盤本益比 (P/E)」**，參考下方建議調整 **「基準曝險」**。
         * 確認 `自動抓取 ATH` 與 `今日大盤` 數值。
         * 更新各類資產的 **「股數」** 與最新的 **「質押借款總額」**。
-    2.  **儀表板判讀**
+    2.  **儀表板判讀 (Dashboard Check)**
         * 觀察 **「戰略地圖」** 與 **「紅綠燈訊號」**。
-    3.  **存檔記錄**
-        * 點擊 **「💾 儲存今日資產紀錄」**，系統將保存所有數據。
+    3.  **存檔記錄 (Archive)**
+        * 點擊 **「💾 儲存今日資產紀錄」**。
     """)
     st.divider()
     st.subheader("🔍 核心指標深度解讀")
     with st.expander("1. MDD (最大回檔)"): st.write("目前大盤指數距離歷史最高點 (ATH) 的跌幅。")
     with st.expander("2. Gap (偏離度)"): st.write("目前攻擊曝險 - 目標攻擊曝險。")
     with st.expander("3. T值 (維持率)"): st.write("總資產 / 負債。低於 250% 為紅燈。")
+    with st.expander("4. U值 (質押負債比)"): st.write("監控整體槓桿。安全上限 35%。")
     
-    # 【新增】U值深度解讀
-    with st.expander("4. U值 (質押負債比) - 槓桿天花板"):
+    # [New] 新增 P/E 解讀
+    with st.expander("5. P/E (本益比) - 價值修正引擎"):
         st.markdown("""
-        * **公式**：`質押借款金額 / 總資產市值 * 100%`
-        * **作用**：監控整體槓桿倍數 (Leverage Ratio)。
-        * **安全上限**：**35%**。
-        * **深度解讀**：
-            * **< 30% (舒適區)**：進可攻退可守，遇到崩盤也不容易斷頭。
-            * **30%~35% (效率區)**：資金利用率高，但需密切關注大盤。
-            * **> 35% (危險區)**：雖然還沒斷頭，但容錯空間極小。一旦大盤回調 10-15%，維持率就會瞬間掉到警戒線。建議在此水位只還不借。
+        * **作用**：結合基本面評價，修正純技術面的盲點。
+        * **判斷標準**：
+            * **P/E > 24.0 (昂貴)**：市場過熱，潛在報酬降低 -> **建議降低基準至 20%**。
+            * **P/E < 18.0 (便宜)**：價值浮現，安全邊際高 -> **建議提高基準至 30%**。
+            * **18.0 ~ 24.0 (合理)**：正常波動 -> **維持既有策略**。
         """)
