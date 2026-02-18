@@ -7,7 +7,7 @@ from datetime import datetime
 import pytz
 
 # --- 1. 頁面基礎設定 ---
-st.set_page_config(page_title="全天候戰情室 (v13.0 智動版)", layout="wide")
+st.set_page_config(page_title="全天候戰情室 (MDD核心版)", layout="wide")
 
 # --- 2. 歷史紀錄系統 (CSV) ---
 HISTORY_FILE = "asset_history.csv"
@@ -37,12 +37,10 @@ def save_record(data_dict):
 def get_market_data():
     data = {"ath": 32996.0, "pe_0050": None}
     try:
-        # 抓取 ATH
         hist = yf.Ticker("^TWII").history(period="5y")
         if not hist.empty: 
             data["ath"] = float(hist['High'].max())
         
-        # [New] 抓取 0050 P/E 作為參考
         etf_50 = yf.Ticker("0050.TW")
         if 'trailingPE' in etf_50.info:
             data["pe_0050"] = etf_50.info['trailingPE']
@@ -50,7 +48,7 @@ def get_market_data():
         pass
     return data
 
-with st.spinner('正在連線抓取市場數據 (ATH & 參考P/E)...'):
+with st.spinner('正在連線抓取市場數據...'):
     market_data = get_market_data()
     ath_auto = market_data["ath"]
     pe_0050_ref = market_data["pe_0050"]
@@ -65,7 +63,6 @@ init_state('input_ath', ath_auto)
 init_state('input_index', 31346.0)
 init_state('input_pe', 26.5)
 
-# 資產預設值
 defaults = {
     'p_675': 185.0, 's_675': 11000,
     'p_631': 466.7, 's_631': 331,
@@ -81,8 +78,8 @@ for k, v in defaults.items():
 with st.sidebar:
     st.header("📝 監控數據輸入")
     
-    # === 一鍵讀取功能 ===
-    if st.button("📂 載入上次存檔數據", type="secondary", help="點擊後將自動填入上次儲存的股價、股數、P/E與大盤點數"):
+    # === 一鍵讀取 ===
+    if st.button("📂 載入上次存檔數據", type="secondary"):
         last_data = load_last_record()
         if last_data is not None:
             try:
@@ -97,91 +94,45 @@ with st.sidebar:
                     st.session_state[f'p_{code}'] = float(last_data[f'P_00{code}'])
                     st.session_state[f's_{code}'] = int(last_data[f'S_00{code}'])
                 
-                st.toast("✅ 成功載入上次數據！", icon="📂")
+                st.toast("✅ 成功載入！", icon="📂")
                 st.rerun()
             except Exception as e:
-                st.error(f"載入失敗 (可能是舊存檔格式不符): {e}")
+                st.error(f"載入失敗: {e}")
         else:
-            st.warning("⚠️ 找不到存檔紀錄")
+            st.warning("⚠️ 無紀錄")
 
-    # A. 市場數據 & ATH 修正
-    with st.expander("0. 市場位階 (ATH 修正)", expanded=True):
+    # A. 市場數據 (MDD 核心)
+    with st.expander("0. 市場位階 (MDD Core)", expanded=True):
         col_ath1, col_ath2 = st.columns([2, 1])
-        with col_ath1: st.metric("自動抓取 ATH", f"{ath_auto:,.0f}")
-        with col_ath2: use_manual_ath = st.checkbox("手動修正", key="manual_ath_check")
+        with col_ath1: st.metric("自動 ATH", f"{ath_auto:,.0f}")
+        with col_ath2: use_manual_ath = st.checkbox("修正", key="manual_ath_check")
             
         if use_manual_ath:
-            final_ath = st.number_input("輸入正確 ATH", step=10.0, format="%.0f", key="input_ath")
+            final_ath = st.number_input("輸入 ATH", step=10.0, format="%.0f", key="input_ath")
         else:
             final_ath = ath_auto
         
         st.markdown("---")
-        current_index = st.number_input("今日大盤收盤點數", step=10.0, format="%.0f", key="input_index")
+        current_index = st.number_input("今日大盤點數", step=10.0, format="%.0f", key="input_index")
         
         mdd_pct = ((final_ath - current_index) / final_ath) * 100 if final_ath > 0 else 0.0
-        st.info(f"📉 目前 MDD: {mdd_pct:.2f}% (ATH: {final_ath:,.0f})")
+        st.info(f"📉 目前 MDD: {mdd_pct:.2f}%")
         
-        # [New] 凱利 P/E 模組 (含自動參考 & 官方連結)
-        st.caption("---")
-        st.caption("🎯 戰術濾網 (Beta & P/E)")
+        # P/E 僅作參考，不干擾決策
+        pe_val = st.number_input("參考 P/E (選填)", step=0.1, key="input_pe")
+        pe_status = ""
+        if pe_val > 24: pe_status = "⚠️ 偏貴"
+        elif pe_val < 18: pe_status = "💎 便宜"
+        else: pe_status = "✅ 合理"
+        st.caption(f"P/E 狀態: {pe_status} (僅供參考)")
+
+        # 回歸最純粹的 Base Exposure 設定
+        st.markdown("---")
+        base_exposure = st.number_input("基準曝險 % (Tier 1)", value=23.0, min_value=20.0, max_value=30.0, step=1.0, help="由您決定，不受 P/E 限制")
         
-        # 顯示 0050 參考值
-        if pe_0050_ref:
-            st.metric("📊 0050 P/E (參考)", f"{pe_0050_ref:.2f}", help="利用 0050 作為大盤近似值參考")
-        else:
-            st.caption("⚠️ 無法抓取 0050 P/E")
-
-        # 官方連結按鈕
-        st.link_button("🔗 點此查詢證交所最新 P/E", "https://www.twse.com.tw/zh/page/trading/exchange/BWIBBU_d.html")
-
-        pe_val = st.number_input("輸入大盤本益比 (P/E)", step=0.1, key="input_pe", help="請輸入證交所官方數據以求精確")
-        
-        # P/E 決定 Beta 與 Base Tier
-        rec_beta = 1.6
-        rec_base = 20.0
-        rec_msg = "🛡️ 防禦 (Defense)"
-        rec_color = "red"
-
-        if pe_val >= 24.0:
-            rec_beta = 1.6
-            rec_base = 20.0
-            rec_msg = "🛡️ 防禦 (Defense)"
-            rec_color = "red"
-        elif pe_val >= 21.0:
-            rec_beta = 2.0
-            rec_base = 23.0
-            rec_msg = "⚖️ 標準 (Standard)"
-            rec_color = "orange"
-        elif pe_val >= 18.0:
-            rec_beta = 2.5
-            rec_base = 25.0
-            rec_msg = "⚔️ 進攻 (Attack)"
-            rec_color = "green"
-        else:
-            rec_beta = 3.0
-            rec_base = 30.0
-            rec_msg = "🚀 全速 (Full Speed)"
-            rec_color = "blue"
-
-        # 顯示建議
-        if rec_color == "red":
-            st.error(f"{rec_msg}\n\n建議 Beta: < {rec_beta}\n建議基準: {rec_base:.0f}%")
-        elif rec_color == "orange":
-            st.warning(f"{rec_msg}\n\n建議 Beta: ~ {rec_beta}\n建議基準: {rec_base:.0f}%")
-        elif rec_color == "green":
-            st.success(f"{rec_msg}\n\n建議 Beta: > {rec_beta}\n建議基準: {rec_base:.0f}%")
-        else:
-            st.info(f"{rec_msg}\n\n建議 Beta: {rec_beta}+\n建議基準: {rec_base:.0f}%")
-
-        # 基準曝險輸入
-        base_exposure = st.number_input("目前基準曝險 % (Tier 1)", value=23.0, min_value=20.0, max_value=30.0, step=1.0)
-        
-        if base_exposure > rec_base:
-             st.caption(f"⚠️ **注意**：設定 ({base_exposure}%) 高於建議值 ({rec_base:.0f}%)！")
-
         ratchet_level = int(base_exposure - 20)
         level_sign = "+" if ratchet_level > 0 else ""
-        st.caption(f"ℹ️ 目前位階: {level_sign}{ratchet_level}")
+        st.caption(f"ℹ️ 棘輪位階: {level_sign}{ratchet_level}")
 
     # B. 資產數據輸入
     with st.expander("1. 攻擊型資產 (正二)", expanded=True):
@@ -213,7 +164,7 @@ with st.sidebar:
     st.subheader("5. 負債監控")
     loan_amount = st.number_input("目前質押借款總額 (O)", value=2350000, step=10000)
 
-# --- 6. 運算引擎 ---
+# --- 6. 運算引擎 (純 MDD 邏輯) ---
 tier_0 = base_exposure
 tier_1 = base_exposure + 5.0
 tier_2 = base_exposure + 5.0
@@ -321,8 +272,8 @@ with tab1:
         return [f'background-color: {color}' for _ in row]
     
     with m4:
-        level_str = f"+{ratchet_level}" if ratchet_level > 0 else f"{ratchet_level}"
-        st.caption(f"ℹ️ {level_str}位階動態曝險 (P/E: {pe_val})")
+        # P/E 僅作參考，不顯示建議 Beta
+        st.caption(f"ℹ️ 策略引擎: MDD 階梯 (參考 P/E: {pe_val})")
         st.dataframe(df_ladder.style.apply(highlight_current_row, axis=1).format({"目標曝險": "{:.0f}%"}), hide_index=True, use_container_width=True)
 
     st.divider()
@@ -330,12 +281,7 @@ with tab1:
     st.subheader("2. 投資組合核心數據")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("💰 資產總市值 (I)", f"${total_assets:,.0f}", delta=f"${diff_total:,.0f} (vs 上次)", help=f"上次紀錄時間: {last_date_str}")
-    
-    beta_delta_color = "off"
-    if portfolio_beta > rec_beta: beta_delta_color = "inverse"
-    elif portfolio_beta < rec_beta - 0.5: beta_delta_color = "normal"
-    
-    col2.metric("📉 整體 Beta 值", f"{portfolio_beta:.2f}", delta=f"建議: {rec_beta} ({rec_msg})", delta_color=beta_delta_color)
+    col2.metric("📉 整體 Beta 值", f"{portfolio_beta:.2f}", delta="目標: 1.05 ~ 1.20", delta_color="off")
     
     t_color = "normal"
     if maintenance_ratio < 250: t_color = "inverse"
@@ -403,24 +349,19 @@ with tab2:
     st.title("📖 全天候系統操作指南 (SOP)")
     st.subheader("⚙️ 每日操作流程")
     st.markdown("""
-    1.  **資料更新 (Data Check)**
+    1.  **資料更新**
         * 點擊 **「📂 載入上次存檔數據」**。
-        * 查看 **「0050 P/E (參考)」**，或點擊 **「🔗 連結」** 查詢證交所官方數據。
-        * 將確認後的 P/E 填入輸入框，系統將自動建議 Beta 水位。
+        * 確認 ATH 與大盤點數 (主要決策依據)。
+        * 更新 P/E 值 (僅作參考，不影響紅綠燈)。
         * 更新股數與質押金額。
     2.  **儀表板判讀**
-        * 檢查 **「整體 Beta 值」** 與建議值的落差。
-        * 檢查 **「紅綠燈訊號」** 執行買賣。
+        * **Gap (偏離度)**： +/- 3% 為行動門檻。
+        * **MDD (跌幅)**：決定目標曝險 (Target)。
     3.  **存檔記錄**
         * 點擊 **「💾 儲存今日資產紀錄」**。
     """)
     st.divider()
     st.subheader("🔍 核心指標深度解讀")
-    with st.expander("1. Beta (波動係數) & P/E 濾網"):
-        st.markdown("""
-        * **P/E (路況)** > 24 (貴) -> **Beta (車速)** < 1.6。
-        * **P/E (路況)** < 18 (俗) -> **Beta (車速)** > 2.5。
-        """)
-    with st.expander("2. MDD (最大回檔)"): st.write("目前大盤跌幅。")
-    with st.expander("3. Gap (偏離度)"): st.write("攻擊曝險與目標的差距，超過 3% 執行再平衡。")
-    with st.expander("4. T值 & U值"): st.write("維持率 > 300%，負債比 < 35%。")
+    with st.expander("1. MDD (最大回檔) - 唯一指揮官"): st.write("策略絕對核心。MDD 決定戰場位置 (位階)，進而決定曝險比例。")
+    with st.expander("2. P/E (本益比) - 參考後照鏡"): st.write("僅供參考市場熱度，不強制干預曝險決策。")
+    with st.expander("3. T值 & U值 (生存底線)"): st.write("維持率 > 300%，負債比 < 35%。")
