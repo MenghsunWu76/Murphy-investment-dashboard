@@ -7,7 +7,7 @@ from datetime import datetime
 import pytz
 
 # --- 1. 頁面基礎設定 ---
-st.set_page_config(page_title="全天候戰情室 (v16.0 選擇權戰情室)", layout="wide")
+st.set_page_config(page_title="全天候戰情室 (v17.0 最終完全體)", layout="wide")
 
 # --- 2. 歷史紀錄系統 (CSV) ---
 HISTORY_FILE = "asset_history.csv"
@@ -402,7 +402,7 @@ with tab2:
     with st.expander("2. MDD (最大回檔)"): st.write("策略絕對核心。MDD 決定戰場位置 (位階)。")
     with st.expander("3. T值 & U值"): st.write("維持率 > 300%，負債比 < 35%。")
 
-# === [New] 分頁 3: 選擇權戰情室 ===
+# === 分頁 3: 選擇權戰情室 ===
 with tab3:
     st.title("🚀 選擇權每週戰情室 (TXO Weekly)")
     st.markdown("利用 **Delta 機率** 與 **P/E 位階**，打造穩健的現金流外掛。")
@@ -434,7 +434,21 @@ with tab3:
         sell_strike = round((current_index - delta_safety_dist) / 100) * 100
         buy_strike = sell_strike - 500
     
-    # 顯示策略卡片
+    # [New] 口數建議計算機
+    st.subheader("🔢 口數建議 (Position Sizing)")
+    
+    txo_contract_val = current_index * 50
+    st.caption(f"ℹ️ 一口 TXO 合約價值: ${txo_contract_val:,.0f}")
+    
+    coverage_ratio = st.slider("設定資產覆蓋率 (Hedge Ratio)", min_value=10, max_value=60, value=30, step=10, help="建議 20%~30% 為舒適區")
+    
+    safe_exposure = total_assets * (coverage_ratio / 100)
+    suggested_lots = int(safe_exposure / txo_contract_val)
+    
+    col_lots1, col_lots2 = st.columns(2)
+    col_lots1.metric("🛡️ 建議操作口數", f"{suggested_lots} 組", help=f"基於 {coverage_ratio}% 資產覆蓋率")
+    col_lots2.metric("💰 曝險總值", f"${suggested_lots * txo_contract_val:,.0f}")
+    
     st.divider()
     
     if txo_strategy != "WAIT":
