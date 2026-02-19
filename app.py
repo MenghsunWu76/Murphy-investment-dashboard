@@ -7,7 +7,7 @@ from datetime import datetime
 import pytz
 
 # --- 1. 頁面基礎設定 ---
-st.set_page_config(page_title="全天候戰情室 (v15.0 槓桿衛士版)", layout="wide")
+st.set_page_config(page_title="全天候戰情室 (v16.0 選擇權戰情室)", layout="wide")
 
 # --- 2. 歷史紀錄系統 (CSV) ---
 HISTORY_FILE = "asset_history.csv"
@@ -124,7 +124,7 @@ with st.sidebar:
             st.caption(f"參考: 0050 PE {pe_0050_ref:.2f}")
         st.link_button("🔗 查詢證交所官方 P/E", "https://www.twse.com.tw/zh/page/trading/exchange/BWIBBU_d.html")
         
-        pe_val = st.number_input("輸入大盤 P/E (決定槓桿上限)", step=0.1, key="input_pe")
+        pe_val = st.number_input("輸入大盤 P/E (決定戰略)", step=0.1, key="input_pe")
 
         # 計算安全槓桿上限 (依據您的凱利公式圖表)
         safe_leverage_limit = 160
@@ -134,7 +134,7 @@ with st.sidebar:
         elif pe_val < 23.0: safe_leverage_limit = 200
         else: safe_leverage_limit = 160 # PE > 23 (包含 25, 26.5)
 
-        st.caption(f"🛡️ P/E {pe_val} -> 安全槓桿上限: {safe_leverage_limit}%")
+        st.caption(f"🛡️ 安全槓桿上限: {safe_leverage_limit}%")
 
         st.markdown("---")
         base_exposure = st.number_input("基準曝險 % (Tier 1)", value=23.0, min_value=20.0, max_value=30.0, step=1.0)
@@ -189,8 +189,7 @@ val_ammo = v_865
 total_assets = val_attack + val_core + val_defense + val_ammo
 net_assets = total_assets - loan_amount
 
-# [New] 實質槓桿率計算
-# 正二曝險算 2倍，其他算 1倍
+# 實質槓桿率計算
 real_exposure = (val_attack * 2.0) + (val_core * 1.0) + (val_defense * 1.0) + (val_ammo * 1.0)
 real_leverage_ratio = (real_exposure / net_assets) * 100 if net_assets > 0 else 0
 
@@ -269,7 +268,7 @@ with st.sidebar:
 
 # --- 8. 主畫面 (分頁系統) ---
 
-tab1, tab2 = st.tabs(["📊 戰情室 Dashboard", "📖 操作指南 & 指標解讀"])
+tab1, tab2, tab3 = st.tabs(["📊 戰情室 Dashboard", "📖 操作指南 & 指標解讀", "🚀 選擇權戰情室 (TXO)"])
 
 # === 分頁 1: 戰情室 ===
 with tab1:
@@ -294,12 +293,10 @@ with tab1:
     st.divider()
 
     st.subheader("2. 投資組合核心數據")
-    # [Updated] 新增第五欄位顯示槓桿率
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("💰 資產總市值 (I)", f"${total_assets:,.0f}", delta=f"${diff_total:,.0f}", help="vs 上次存檔")
     col2.metric("📉 整體 Beta 值", f"{portfolio_beta:.2f}")
     
-    # 槓桿率判定
     lev_delta_color = "normal"
     lev_msg = "✅ 安全"
     if real_leverage_ratio > safe_leverage_limit:
@@ -404,3 +401,63 @@ with tab2:
         st.write("公式：`總市場曝險(正二算2倍) / 淨資產`。這是您最真實的曝險倍數。")
     with st.expander("2. MDD (最大回檔)"): st.write("策略絕對核心。MDD 決定戰場位置 (位階)。")
     with st.expander("3. T值 & U值"): st.write("維持率 > 300%，負債比 < 35%。")
+
+# === [New] 分頁 3: 選擇權戰情室 ===
+with tab3:
+    st.title("🚀 選擇權每週戰情室 (TXO Weekly)")
+    st.markdown("利用 **Delta 機率** 與 **P/E 位階**，打造穩健的現金流外掛。")
+    
+    # 計算 Delta 0.2 安全距離 (約 2.5%)
+    delta_safety_dist = current_index * 0.025
+    
+    # 策略邏輯判斷
+    txo_strategy = "WAIT"
+    txo_title = "❌ 戰略停火 (Ceasefire)"
+    txo_desc = "目前估值偏低，應全力做多正二現貨，避免賣 Put 風險。"
+    txo_color = "gray"
+    
+    if pe_val >= 24.0:
+        txo_strategy = "BEAR_CALL"
+        txo_title = "🐻 Bear Call Spread (高空收租)"
+        txo_desc = "P/E 昂貴 (>24)。預期大盤上檔受限，賣出上方買權收取時間價值，作為正二現貨的避險。"
+        txo_color = "red"
+        # 履約價計算 (向上取整)
+        sell_strike = round((current_index + delta_safety_dist) / 100) * 100
+        buy_strike = sell_strike + 500
+        
+    elif pe_val >= 21.0:
+        txo_strategy = "BULL_PUT"
+        txo_title = "🐂 Bull Put Spread (低檔收租)"
+        txo_desc = "P/E 合理 (21~24)。趨勢穩健，賣出下方賣權收取權利金，增加現金流。"
+        txo_color = "green"
+        # 履約價計算 (向下取整)
+        sell_strike = round((current_index - delta_safety_dist) / 100) * 100
+        buy_strike = sell_strike - 500
+    
+    # 顯示策略卡片
+    st.divider()
+    
+    if txo_strategy != "WAIT":
+        st.subheader(f"🎯 本週建議策略：{txo_title}")
+        st.info(txo_desc)
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("1. 賣出 (Sell)", f"{sell_strike}", "收取權利金 (主)", delta_color="inverse")
+        c2.metric("2. 買進 (Buy)", f"{buy_strike}", "保護 (價差 500點)", delta_color="normal")
+        c3.metric("📊 預估 Delta", "~ 0.20", "約 2.5% 安全距離")
+        
+        st.caption(f"💡 邏輯：目前指數 {current_index:,.0f} +/- {delta_safety_dist:.0f} 點 (安全距離)")
+        st.warning("**紀律提醒**：若大盤觸及「賣出履約價」，請無條件停損/平倉，嚴禁凹單。")
+    
+    else:
+        st.subheader(f"🛑 本週建議：{txo_title}")
+        st.warning(txo_desc)
+        st.caption(f"目前 P/E: {pe_val} (低於 21.0)")
+
+    st.divider()
+    with st.expander("🔍 什麼是 Delta 0.2 安全距離？"):
+        st.markdown("""
+        * **原理**：Delta 0.2 代表該履約價只有 **20% 的機率** 會被穿價 (輸錢)，也就是有 **80% 的機率** 您能穩收租金。
+        * **計算**：系統自動以 `大盤指數 x 2.5%` 作為 Delta 0.2 的近似值 (約 800~900 點)。
+        * **操作**：賣在这个位置，就像在郊區收房租，雖然租金不如市中心 (價平) 高，但非常安全，適合長期現金流策略。
+        """)
