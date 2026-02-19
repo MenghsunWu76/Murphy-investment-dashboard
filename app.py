@@ -7,7 +7,7 @@ from datetime import datetime
 import pytz
 
 # --- 1. 頁面基礎設定 ---
-st.set_page_config(page_title="全天候戰情室 (v17.0 最終完全體)", layout="wide")
+st.set_page_config(page_title="全天候戰情室 (v18.0 資金水位旗艦版)", layout="wide")
 
 # --- 2. 歷史紀錄系統 (CSV) ---
 HISTORY_FILE = "asset_history.csv"
@@ -124,7 +124,7 @@ with st.sidebar:
             st.caption(f"參考: 0050 PE {pe_0050_ref:.2f}")
         st.link_button("🔗 查詢證交所官方 P/E", "https://www.twse.com.tw/zh/page/trading/exchange/BWIBBU_d.html")
         
-        pe_val = st.number_input("輸入大盤 P/E (決定戰略)", step=0.1, key="input_pe")
+        pe_val = st.number_input("輸入大盤 P/E (決定槓桿上限)", step=0.1, key="input_pe")
 
         # 計算安全槓桿上限 (依據您的凱利公式圖表)
         safe_leverage_limit = 160
@@ -230,7 +230,41 @@ current_attack_ratio = (val_attack / total_assets) * 100 if total_assets > 0 els
 gap = current_attack_ratio - target_attack_ratio
 threshold = 3.0
 
-# --- 7. 讀取與儲存歷史資料 ---
+# --- 7. [New] 資金水位與額度試算引擎 ---
+# A. P/E 限額計算 (Strategy Ceiling)
+# 凱利允許的最大曝險 = 淨資產 * 安全槓桿率
+max_allowed_exposure_kelly = net_assets * (safe_leverage_limit / 100.0)
+exposure_gap = max_allowed_exposure_kelly - real_exposure # 正數=可加碼，負數=需減碼
+
+# B. 券商限額計算 (Broker Ceiling - U值 35%)
+# 35% 負債比上限反推最大貸款額 = 總資產 * 0.35 (近似)
+# 更保守算法：維持淨資產不變下，最大資產 = NetAssets / (1-0.35)
+max_assets_broker = net_assets / (1 - 0.35)
+max_loan_broker = max_assets_broker - net_assets
+loan_headroom = max_loan_broker - loan_amount
+
+# C. 綜合建議
+recommendation_action = "HOLD"
+recommendation_amount = 0
+action_color = "off"
+
+# 判斷邏輯
+if exposure_gap < 0:
+    # 超速：需要減碼
+    recommendation_action = "REDUCE"
+    recommendation_amount = abs(exposure_gap) # 這是需要減少的"曝險值"
+    # 如果是賣正二(2x)，只需賣一半金額; 如果還款(1x)，需還全額
+    action_color = "inverse" # 紅燈
+else:
+    # 安全：計算可動用額度
+    recommendation_action = "BORROW"
+    # 可借金額 = Min(凱利剩餘曝險空間/2, 券商剩餘額度)
+    # 假設借錢買正二(2x)，每一塊錢增加2塊曝險 -> 故除以2
+    borrow_power_kelly = exposure_gap / 2 
+    recommendation_amount = min(borrow_power_kelly, loan_headroom)
+    action_color = "normal" # 綠燈
+
+# --- 8. 讀取與儲存歷史資料 ---
 last_record = load_last_record()
 diff_total = 0
 if last_record is not None:
@@ -266,7 +300,7 @@ with st.sidebar:
     if last_record is not None:
         st.caption(f"上次存檔: {last_date_str}")
 
-# --- 8. 主畫面 (分頁系統) ---
+# --- 9. 主畫面 (分頁系統) ---
 
 tab1, tab2, tab3 = st.tabs(["📊 戰情室 Dashboard", "📖 操作指南 & 指標解讀", "🚀 選擇權戰情室 (TXO)"])
 
@@ -292,7 +326,30 @@ with tab1:
 
     st.divider()
 
-    st.subheader("2. 投資組合核心數據")
+    # [New] 資金水位與額度試算
+    st.subheader("2. 💰 資金水位與額度試算 (Liquidity Check)")
+    
+    liq_c1, liq_c2, liq_c3 = st.columns(3)
+    
+    # Col 1: P/E 戰略限額
+    liq_c1.metric("🛡️ 戰略限額 (Kelly)", f"{safe_leverage_limit}%", help="依據 P/E 決定的安全槓桿上限")
+    liq_c1.progress(min(real_leverage_ratio / safe_leverage_limit, 1.0), text=f"目前使用率: {real_leverage_ratio:.1f}%")
+    
+    # Col 2: 券商硬限額 (U=35%)
+    liq_c2.metric("🏦 券商限額 (U<35%)", f"$ {max_loan_broker:,.0f}", help="質押負債比 35% 對應的借款上限")
+    usage_rate_broker = loan_amount / max_loan_broker if max_loan_broker > 0 else 0
+    liq_c2.progress(min(usage_rate_broker, 1.0), text=f"目前借款: $ {loan_amount:,.0f}")
+    
+    # Col 3: 最終建議 (Actionable)
+    if recommendation_action == "REDUCE":
+        liq_c3.metric("⚠️ 建議減碼 (去槓桿)", f"- $ {recommendation_amount/2:,.0f}", "若賣正二(2x)所需金額", delta_color="inverse")
+        st.toast("⚠️ 槓桿超速！請考慮減碼。", icon="🚨")
+    else:
+        liq_c3.metric("✅ 可動用額度 (加碼)", f"+ $ {recommendation_amount:,.0f}", "買入正二(2x)之最大金額", delta_color="normal")
+    
+    st.divider()
+
+    st.subheader("3. 投資組合核心數據")
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("💰 資產總市值 (I)", f"${total_assets:,.0f}", delta=f"${diff_total:,.0f}", help="vs 上次存檔")
     col2.metric("📉 整體 Beta 值", f"{portfolio_beta:.2f}")
@@ -315,7 +372,7 @@ with tab1:
 
     st.divider()
 
-    st.subheader("3. 資產配置與指令")
+    st.subheader("4. 資產配置與指令")
     c1, c2 = st.columns([2, 1])
     with c1:
         st.markdown("**資產配置佔比**")
@@ -377,8 +434,9 @@ with tab2:
         * 輸入 **「P/E」** 與 **「ATH」**。
         * 更新股數與質押金額。
     2.  **儀表板判讀**
+        * **資金水位**：查看「可動用額度」。
         * **Gap**：+/- 3% 再平衡。
-        * **實質槓桿率**：確認是否顯示「✅ 安全」。若顯示「⚠️ 超速」，請優先去槓桿。
+        * **實質槓桿率**：確認是否顯示「✅ 安全」。
     3.  **存檔**：點擊 **「💾 儲存」**。
     """)
     st.divider()
@@ -407,21 +465,16 @@ with tab3:
     st.title("🚀 選擇權每週戰情室 (TXO Weekly)")
     st.markdown("利用 **Delta 機率** 與 **P/E 位階**，打造穩健的現金流外掛。")
     
-    # 計算 Delta 0.2 安全距離 (約 2.5%)
     delta_safety_dist = current_index * 0.025
     
-    # 策略邏輯判斷
     txo_strategy = "WAIT"
     txo_title = "❌ 戰略停火 (Ceasefire)"
     txo_desc = "目前估值偏低，應全力做多正二現貨，避免賣 Put 風險。"
-    txo_color = "gray"
     
     if pe_val >= 24.0:
         txo_strategy = "BEAR_CALL"
         txo_title = "🐻 Bear Call Spread (高空收租)"
         txo_desc = "P/E 昂貴 (>24)。預期大盤上檔受限，賣出上方買權收取時間價值，作為正二現貨的避險。"
-        txo_color = "red"
-        # 履約價計算 (向上取整)
         sell_strike = round((current_index + delta_safety_dist) / 100) * 100
         buy_strike = sell_strike + 500
         
@@ -429,12 +482,9 @@ with tab3:
         txo_strategy = "BULL_PUT"
         txo_title = "🐂 Bull Put Spread (低檔收租)"
         txo_desc = "P/E 合理 (21~24)。趨勢穩健，賣出下方賣權收取權利金，增加現金流。"
-        txo_color = "green"
-        # 履約價計算 (向下取整)
         sell_strike = round((current_index - delta_safety_dist) / 100) * 100
         buy_strike = sell_strike - 500
     
-    # [New] 口數建議計算機
     st.subheader("🔢 口數建議 (Position Sizing)")
     
     txo_contract_val = current_index * 50
@@ -471,7 +521,6 @@ with tab3:
     st.divider()
     with st.expander("🔍 什麼是 Delta 0.2 安全距離？"):
         st.markdown("""
-        * **原理**：Delta 0.2 代表該履約價只有 **20% 的機率** 會被穿價 (輸錢)，也就是有 **80% 的機率** 您能穩收租金。
-        * **計算**：系統自動以 `大盤指數 x 2.5%` 作為 Delta 0.2 的近似值 (約 800~900 點)。
-        * **操作**：賣在这个位置，就像在郊區收房租，雖然租金不如市中心 (價平) 高，但非常安全，適合長期現金流策略。
+        * **原理**：Delta 0.2 代表該履約價只有 **20% 的機率** 會被穿價 (輸錢)。
+        * **操作**：賣在这个位置，就像在郊區收房租，雖然租金不如市中心 (價平) 高，但非常安全。
         """)
