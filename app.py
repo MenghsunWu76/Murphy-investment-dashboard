@@ -9,7 +9,7 @@ from datetime import datetime
 import pytz
 
 # --- 1. 頁面基礎設定 ---
-st.set_page_config(page_title="A.D.E.I.S 終極機率戰情室 (v20.0)", layout="wide")
+st.set_page_config(page_title="A.D.E.I.S 旗艦機率戰情室 (v21.0)", layout="wide")
 
 # --- 2. 歷史紀錄系統 (CSV 雲端保險箱) ---
 HISTORY_FILE = "asset_history.csv"
@@ -60,7 +60,7 @@ init_state('input_ath', ath_auto)
 init_state('input_index', 31346.0)
 init_state('input_pe', 26.5)
 
-# 移除 00948B，保留黃金四角
+# 黃金四角配置預設值
 defaults = {
     'p_675': 185.0, 's_675': 11000, 'p_631': 466.7, 's_631': 331,
     'p_670': 157.95, 's_670': 616, 'p_662': 102.25, 's_662': 25840,
@@ -181,7 +181,6 @@ else: target_attack_ratio, current_tier_index = tier_5, 5
 
 current_tier_name = ladder_data[current_tier_index]["位階"]
 current_attack_ratio = (val_attack / total_assets) * 100 if total_assets > 0 else 0
-# 優化：放寬 Gap 容忍度至 5% (適應大資金)
 gap_tolerance = 5.0 
 gap = current_attack_ratio - target_attack_ratio
 
@@ -229,6 +228,7 @@ with st.sidebar:
 # --- 7. 主畫面 ---
 tab1, tab2, tab3, tab4 = st.tabs(["📊 戰情室 Dashboard", "📖 現金流與 SOP", "🚀 選擇權戰情室 (TXO)", "🔮 蒙地卡羅未來推演"])
 
+# 【V21 修復】完全還原 V19 的 4 大區塊經典排版
 with tab1:
     st.subheader("1. 動態戰略地圖")
     m1, m2, m3, m4 = st.columns([1, 1, 1, 2])
@@ -242,7 +242,23 @@ with tab1:
         st.dataframe(df_ladder.style.apply(highlight_current_row, axis=1).format({"目標曝險": "{:.0f}%"}), hide_index=True, use_container_width=True)
 
     st.divider()
-    st.subheader("2. 投資組合核心數據與指令")
+    
+    # 完美還原 V19 的水庫與進度條
+    st.subheader("2. 💰 資金水位與額度試算 (Liquidity Check)")
+    liq_c1, liq_c2, liq_c3 = st.columns(3)
+    liq_c1.metric("🛡️ 戰略限額 (Kelly)", f"{safe_leverage_limit}%")
+    liq_c1.progress(min(real_leverage_ratio / safe_leverage_limit, 1.0), text=f"目前使用率: {real_leverage_ratio:.1f}%")
+    
+    liq_c2.metric("🏦 券商限額 (U<35%)", f"$ {max_loan_broker:,.0f}")
+    liq_c2.progress(min(loan_amount / max_loan_broker if max_loan_broker > 0 else 0, 1.0), text=f"目前借款: $ {loan_amount:,.0f}")
+    
+    if recommendation_action == "REDUCE":
+        liq_c3.metric("⚠️ 建議減碼 (去槓桿)", f"- $ {recommendation_amount/2:,.0f}", "若賣正二(2x)所需金額", delta_color="inverse")
+    else:
+        liq_c3.metric("✅ 可動用額度 (加碼)", f"+ $ {recommendation_amount:,.0f}", "買入正二(2x)之最大金額", delta_color="normal")
+
+    st.divider()
+    st.subheader("3. 投資組合核心數據")
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("💰 資產總市值 (I)", f"${total_assets:,.0f}", delta=f"${diff_total:,.0f}")
     col2.metric("📉 整體 Beta 值", f"{portfolio_beta:.2f}")
@@ -250,24 +266,44 @@ with tab1:
     col4.metric("🛡️ 整戶維持率 (T)", f"{maintenance_ratio:.0f}%", delta="安全線 > 300%", delta_color="inverse" if maintenance_ratio < 300 else "normal")
     col5.metric("💳 質押負債比 (U)", f"{loan_ratio:.1f}%", delta="安全線 < 35%", delta_color="inverse" if loan_ratio > 35 else "normal")
 
-    st.markdown("**AI 戰略指令**")
-    if maintenance_ratio < 250: st.error("⛔ **紅色警戒：維持率危險！禁止買進，優先賣出債券或核心資產還債。**")
-    elif real_leverage_ratio > safe_leverage_limit: st.warning(f"⚠️ **槓桿超標 (上限 {safe_leverage_limit}%)：禁止加碼正二，請用現金流還款降壓。**")
-    else:
-        if gap > gap_tolerance: st.warning(f"🔴 **賣出訊號 (+{gap:.1f}%)：賣出約 ${val_attack - (total_assets * target_attack_ratio / 100):,.0f} 正二，轉入 00865B 子彈庫。**")
-        elif gap < -gap_tolerance: st.success(f"🟢 **買進訊號 ({gap:.1f}%)：動用約 ${(total_assets * target_attack_ratio / 100) - val_attack:,.0f} 買進正二。**")
-        else: st.success(f"✅ **系統待機：財務健康且無偏離 (容忍度 +/- {gap_tolerance}%)。**")
+    st.divider()
+    
+    # 完美還原 V19 的圓餅圖與 AI 指令並排設計
+    st.subheader("4. 資產配置與指令")
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        chart_data = pd.DataFrame({'資產類別': ['攻擊型', '核心', '防禦', '子彈庫'], '市值': [val_attack, val_core, val_defense, val_ammo]})
+        fig = px.pie(chart_data, values='市值', names='資產類別', color='資產類別', color_discrete_map={'攻擊型': '#FF4B4B', '核心': '#FFD700', '防禦': '#2E8B57', '子彈庫': '#87CEFA'}, hole=0.45)
+        fig.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig, use_container_width=True)
+
+    with c2:
+        st.markdown("**AI 戰略指令**")
+        risk_msgs = []
+        if maintenance_ratio < 300: risk_msgs.append(f"⚠️ 維持率 ({maintenance_ratio:.0f}%) 低於 300%")
+        if loan_ratio > 35: risk_msgs.append(f"⚠️ 負債比 ({loan_ratio:.1f}%) 高於 35%")
+        if real_leverage_ratio > safe_leverage_limit: risk_msgs.append(f"⚠️ 槓桿 ({real_leverage_ratio:.1f}%) 超標")
+
+        if maintenance_ratio < 250: st.error("⛔ **紅色警戒**\n\n維持率危險！禁止買進，賣股還債。")
+        elif len(risk_msgs) > 0:
+            st.warning(f"🟠 **風險提示**\n\n{chr(10).join(risk_msgs)}\n\n**指令：禁止加碼，考慮減碼。**")
+        else:
+            if gap > gap_tolerance: st.warning(f"🔴 **賣出訊號** (+{gap:.1f}%)\n賣出：${val_attack - (total_assets * target_attack_ratio / 100):,.0f} 轉入子彈庫")
+            elif gap < -gap_tolerance: st.success(f"🟢 **買進訊號** ({gap:.1f}%)\n動用：${(total_assets * target_attack_ratio / 100) - val_attack:,.0f} 買進正二")
+            else: st.success(f"✅ **系統待機**\n財務健康且無偏離。\n容忍度: +/- {gap_tolerance}%")
 
 with tab2:
-    st.title("📖 A.D.E.I.S 實戰教戰守則")
+    st.title("📖 A.D.E.I.S 實戰教戰守則 (無息子彈庫版)")
     st.markdown("""
     ### 🌊 現金流瀑布模型 (由上而下分配)
-    1. **第一層 (生存線)**：預留足夠扣繳未來數月「質押利息」的現金。
+    *(註：00865B 為純資金池不配息，現金流主要來自 00713 股息與 TXO 收租)*
+    
+    1. **第一層 (生存線)**：預留足夠扣繳未來數月「質押利息」的現金，達成零成本槓桿。
     2. **第二層 (降壓防禦)**：若 U值 > 35% 或 P/E > 26.5，剩下的錢全數拿去「償還本金」。
     3. **第三層 (估值再投資)**：若護城河安全，看 P/E 燈號買進：
-       * 🔴 P/E > 25 (貴) ➔ 買 **00865B** 或 **00713** (囤積子彈)。
-       * 🟡 P/E 21~25 (普) ➔ 買 **00662** (擴張核心)。
-       * 🟢 P/E < 21 (俗) ➔ 買 **00675L** (低檔重壓)。
+       * 🔴 P/E > 25 (貴) ➔ 買 **00865B** 或 **00713** (囤積子彈庫)。
+       * 🟡 P/E 21~25 (普) ➔ 買 **00662** (擴張美股核心)。
+       * 🟢 P/E < 21 (俗) ➔ 買 **00675L** (低檔火力全開)。
     """)
 
 with tab3:
@@ -295,7 +331,7 @@ with tab4:
     st.markdown("基於您 **今日真實的資產配置** 與 **借款金額**，模擬未來 10,000 種平行宇宙的財富軌跡。")
     
     with st.expander("⚙️ 調整總體經濟預期假設 (可微調)", expanded=False):
-        st.markdown("系統已根據您的四角配置 (正二、納斯達克、高息、短債) 計算出加權預設值。您可以根據對未來 AI 發展的樂觀/悲觀程度微調：")
+        st.markdown("系統已根據您的四角配置 (正二、納斯達克、高息、短債) 計算出加權預設值。您可以微調：")
         w_atk, w_cor = val_attack/total_assets if total_assets>0 else 0, val_core/total_assets if total_assets>0 else 0
         w_def, w_amo = val_defense/total_assets if total_assets>0 else 0, val_ammo/total_assets if total_assets>0 else 0
         
@@ -310,32 +346,28 @@ with tab4:
     
     if st.button("🚀 啟動 10,000 次平行宇宙推演", type="primary"):
         with st.spinner(f"正在運算未來 {mc_years} 年的 10,000 種可能性..."):
-            np.random.seed(42) # 固定隨機種子讓每次顯示穩定，實戰可移除
+            np.random.seed(42) # 實戰時可移除此行，讓每次點擊結果微幅跳動
             num_simulations = 10000
-            steps = mc_years * 12 # 每月結算一次
+            steps = mc_years * 12 # 每月結算
             dt = 1 / 12
             
-            # Geometric Brownian Motion (GBM) 矩陣運算
             Z = np.random.normal(0, 1, (steps, num_simulations))
             drift = (port_mu - 0.5 * port_vol**2) * dt
             diffusion = port_vol * np.sqrt(dt) * Z
             daily_returns = np.exp(drift + diffusion)
             
-            # 計算總資產路徑
             price_paths = np.zeros_like(daily_returns)
             price_paths[0] = total_assets
             for t in range(1, steps):
                 price_paths[t] = price_paths[t-1] * daily_returns[t]
                 
-            # 計算淨資產 (扣除固定借款)
             net_paths = price_paths - loan_amount
             
-            # 斷頭判定 (任一月份 T值 < 130%)
+            # 斷頭判定
             margin_call_threshold = loan_amount * 1.3
             ruin_paths = np.any(price_paths < margin_call_threshold, axis=0)
             ruin_prob = np.mean(ruin_paths) * 100
             
-            # 提取期末淨資產 (排除破產的路徑)
             final_net_assets = net_paths[-1, ~ruin_paths]
             
             if len(final_net_assets) > 0:
@@ -345,7 +377,6 @@ with tab4:
             else:
                 p05 = p50 = p95 = 0
 
-            # --- 繪製機率雲圖 (抽樣 100 條線繪製避免當機) ---
             sample_paths = net_paths[:, np.random.choice(num_simulations, 100, replace=False)]
             time_axis = np.linspace(0, mc_years, steps)
             
@@ -353,16 +384,13 @@ with tab4:
             for i in range(100):
                 fig.add_trace(go.Scatter(x=time_axis, y=sample_paths[:, i], mode='lines', line=dict(color='rgba(135, 206, 250, 0.1)'), showlegend=False))
             
-            # 加上中位數趨勢線
             median_path = np.median(net_paths, axis=1)
             fig.add_trace(go.Scatter(x=time_axis, y=median_path, mode='lines', line=dict(color='#FFD700', width=3), name='中位數預期'))
-            # 加上投入成本線 (目前的淨資產)
             fig.add_trace(go.Scatter(x=[0, mc_years], y=[net_assets, net_assets], mode='lines', line=dict(color='#FF4B4B', width=2, dash='dash'), name='目前淨資產起點'))
             
             fig.update_layout(title=f"未來 {mc_years} 年淨資產推演 (抽樣 100 條路徑)", xaxis_title="年度", yaxis_title="淨資產 (台幣)", template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
             
-            # --- 顯示終極報告 ---
             st.subheader("📊 家族傳承機率報告")
             r1, r2, r3, r4 = st.columns(4)
             r1.metric(f"💀 斷頭/破產機率", f"{ruin_prob:.2f}%", help="未來任一月份維持率跌破 130% 的機率")
