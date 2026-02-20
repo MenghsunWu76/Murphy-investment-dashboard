@@ -9,7 +9,7 @@ from datetime import datetime
 import pytz
 
 # --- 1. 頁面基礎設定 ---
-st.set_page_config(page_title="A.D.E.I.S 旗艦機率戰情室 (v21.0)", layout="wide")
+st.set_page_config(page_title="A.D.E.I.S 旗艦機率戰情室 (v21.1)", layout="wide")
 
 # --- 2. 歷史紀錄系統 (CSV 雲端保險箱) ---
 HISTORY_FILE = "asset_history.csv"
@@ -228,7 +228,6 @@ with st.sidebar:
 # --- 7. 主畫面 ---
 tab1, tab2, tab3, tab4 = st.tabs(["📊 戰情室 Dashboard", "📖 現金流與 SOP", "🚀 選擇權戰情室 (TXO)", "🔮 蒙地卡羅未來推演"])
 
-# 【V21 修復】完全還原 V19 的 4 大區塊經典排版
 with tab1:
     st.subheader("1. 動態戰略地圖")
     m1, m2, m3, m4 = st.columns([1, 1, 1, 2])
@@ -243,7 +242,6 @@ with tab1:
 
     st.divider()
     
-    # 完美還原 V19 的水庫與進度條
     st.subheader("2. 💰 資金水位與額度試算 (Liquidity Check)")
     liq_c1, liq_c2, liq_c3 = st.columns(3)
     liq_c1.metric("🛡️ 戰略限額 (Kelly)", f"{safe_leverage_limit}%")
@@ -268,7 +266,6 @@ with tab1:
 
     st.divider()
     
-    # 完美還原 V19 的圓餅圖與 AI 指令並排設計
     st.subheader("4. 資產配置與指令")
     c1, c2 = st.columns([2, 1])
     with c1:
@@ -325,22 +322,39 @@ with tab3:
         st.subheader("🛑 本週建議：❌ 戰略停火")
         st.warning("目前估值偏低，應全力做多正二現貨，避免賣 Put 風險。")
 
-# --- 8. 🔮 蒙地卡羅未來推演模組 ---
+# --- 8. 🔮 蒙地卡羅未來推演模組 (AI 信仰動態引力版) ---
 with tab4:
-    st.title("🔮 蒙地卡羅未來資產推演 (Monte Carlo Simulation)")
-    st.markdown("基於您 **今日真實的資產配置** 與 **借款金額**，模擬未來 10,000 種平行宇宙的財富軌跡。")
+    st.title("🔮 蒙地卡羅未來資產推演 (AI-Optimized Gravity Model)")
+    st.markdown("基於您 **今日真實的資產配置** 與 **借款金額**，結合 AI 超級週期的總經環境，模擬未來 10,000 種平行宇宙的財富軌跡。")
     
-    with st.expander("⚙️ 調整總體經濟預期假設 (可微調)", expanded=False):
-        st.markdown("系統已根據您的四角配置 (正二、納斯達克、高息、短債) 計算出加權預設值。您可以微調：")
+    with st.expander("⚙️ 總體經濟動態最佳化 (Dynamic Macro Optimization)", expanded=True):
         w_atk, w_cor = val_attack/total_assets if total_assets>0 else 0, val_core/total_assets if total_assets>0 else 0
         w_def, w_amo = val_defense/total_assets if total_assets>0 else 0, val_ammo/total_assets if total_assets>0 else 0
         
-        default_mu = (w_atk * 0.22) + (w_cor * 0.12) + (w_def * 0.08) + (w_amo * 0.04)
-        default_vol = (w_atk * 0.40) + (w_cor * 0.20) + (w_def * 0.12) + (w_amo * 0.03)
+        # --- 核心優化：AI 信仰與估值引力模型 ---
+        pe_baseline = 22.0  # 承認台股 AI 時代的價值提升，基準線由 15 上調至 22
+        safe_pe_val = max(min(pe_val, 30.0), 15.0) 
         
+        # 1. 報酬率引力乘數：敬畏估值，但不悲觀。P/E 高於 22 會溫和打折。
+        mu_multiplier = pe_baseline / safe_pe_val
+        # 2. 波動率引力乘數：深跌(MDD)或過熱(PE>24)都會增加波動。
+        vol_multiplier = 1.0 + (mdd_pct / 100.0) + (max(safe_pe_val - 24.0, 0) / 40.0)
+
+        # 賦予 AI 信仰的高底氣基準：正二 24%，核心納斯達克 14% (乘以引力修正)
+        adj_atk_mu = 0.24 * mu_multiplier
+        adj_cor_mu = 0.14 * ((mu_multiplier + 1.0) / 2)
+        
+        default_mu = (w_atk * adj_atk_mu) + (w_cor * adj_cor_mu) + (w_def * 0.08) + (w_amo * 0.04)
+        default_vol = ((w_atk * 0.40) + (w_cor * 0.22) + (w_def * 0.12) + (w_amo * 0.03)) * vol_multiplier
+        
+        st.markdown(f"🧠 **AI 引擎自動判定**：大盤目前 P/E 為 `{pe_val}` (基準為 22.0)。系統已為您客觀計算出：")
+        st.markdown(f"- 預期報酬率乘數：`{mu_multiplier:.2f}` 倍 (不過度悲觀，保留 AI 動能)")
+        st.markdown(f"- 波動率風險乘數：`{vol_multiplier:.2f}` 倍")
+        
+        st.divider()
         c_mu, c_vol = st.columns(2)
-        port_mu = c_mu.slider("預期投資組合 年化報酬率 (CAGR)", min_value=0.0, max_value=0.40, value=float(default_mu), step=0.01, format="%.2f")
-        port_vol = c_vol.slider("預期投資組合 年化波動率 (Volatility)", min_value=0.05, max_value=0.50, value=float(default_vol), step=0.01, format="%.2f")
+        port_mu = c_mu.slider("最佳化投資組合 年化報酬率 (CAGR)", min_value=0.0, max_value=0.40, value=float(default_mu), step=0.01, format="%.2f")
+        port_vol = c_vol.slider("最佳化投資組合 年化波動率 (Volatility)", min_value=0.05, max_value=0.50, value=float(default_vol), step=0.01, format="%.2f")
     
     mc_years = st.slider("🕰️ 選擇推演時間軸 (Years)", min_value=1, max_value=20, value=5, step=1)
     
@@ -399,6 +413,6 @@ with tab4:
             r4.metric(f"☀️ 最佳 5% (樂觀)", f"${p95:,.0f}", help="AI 超級週期延續，運氣極佳的情況")
             
             if ruin_prob > 5.0:
-                st.error("⚠️ **風險警告：** 您的斷頭機率高於 5%。建議在「戰情室 Dashboard」中調降 U值 (償還借款) 或增加 00713/00865B 的防禦配置，再重新推演。")
+                st.error("⚠️ **風險警告：** 您的斷頭機率高於 5%。建議在「戰情室 Dashboard」中調降 U值 (償還借款) 或增加防禦配置，再重新推演。")
             else:
                 st.success("✅ **系統評估：** 您的投資組合抗壓性極佳，幾乎免疫黑天鵝造成的斷頭風險，請安心享受時間複利。")
