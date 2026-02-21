@@ -211,7 +211,10 @@ else: target_attack_ratio, current_tier_index = tier_5, 5
 
 current_tier_name = ladder_data[current_tier_index]["位階"]
 current_attack_ratio = (val_attack / total_assets) * 100 if total_assets > 0 else 0
-gap_tolerance = 5.0 
+if true_net_assets < 10000000:
+    gap_tolerance = 3.0  # 累積期：高靈敏度
+else:
+    gap_tolerance = 5.0  # 守成期：低摩擦成本 
 gap = current_attack_ratio - target_attack_ratio
 
 max_allowed_exposure_kelly = portfolio_net_assets * (safe_leverage_limit / 100.0)
