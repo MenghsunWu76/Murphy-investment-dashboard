@@ -9,7 +9,7 @@ from datetime import datetime
 import pytz
 
 # --- 1. 頁面基礎設定 ---
-st.set_page_config(page_title="A.D.E.I.S 真實財富戰情室 (v23.0)", layout="wide")
+st.set_page_config(page_title="A.D.E.I.S 真實財富戰情室 (v23.1)", layout="wide")
 
 # --- 2. 歷史紀錄系統 (CSV 雲端保險箱) ---
 HISTORY_FILE = "asset_history.csv"
@@ -288,12 +288,13 @@ with tab1:
 
     st.divider()
     
-    # [新增] 完美融入真實財富的 6 欄位設計
+    # [優化] 自訂欄位寬度比例，完美展開百萬/千萬級數字
     st.subheader("3. 投資組合核心數據")
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1, col2, col3, col4, col5, col6 = st.columns([1.5, 1.5, 0.8, 1.0, 1.0, 1.0])
+    
     col1.metric("💰 總市值", f"${total_assets:,.0f}", help="您的股票與債券總值")
     col2.metric("💎 真實淨資產", f"${true_net_assets:,.0f}", delta=f"{diff_total:+,.0f}", help="總市值 - 質押借款 - 房貸增貸 - 信貸")
-    col3.metric("📉 Beta 值", f"{portfolio_beta:.2f}")
+    col3.metric("📉 Beta", f"{portfolio_beta:.2f}")
     col4.metric("⚙️ 槓桿率", f"{real_leverage_ratio:.1f}%", delta="⚠️ 超速" if real_leverage_ratio > safe_leverage_limit else "✅ 安全", delta_color="inverse" if real_leverage_ratio > safe_leverage_limit else "normal")
     col5.metric("🛡️ 維持率 (T)", f"{maintenance_ratio:.0f}%", delta="安全線 > 300%", delta_color="inverse" if maintenance_ratio < 300 else "normal")
     col6.metric("💳 負債比 (U)", f"{loan_ratio:.1f}%", delta="安全線 < 35%", delta_color="inverse" if loan_ratio > 35 else "normal")
