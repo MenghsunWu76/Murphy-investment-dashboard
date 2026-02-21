@@ -356,23 +356,83 @@ with tab2:
     """)
 
 with tab3:
-    st.title("🚀 選擇權每週戰情室 (TXO Weekly)")
-    delta_safety_dist = current_index * 0.025
-    if pe_val >= 24.0:
-        st.subheader("🎯 本週建議策略：🐻 Bear Call Spread (高空收租)")
-        st.info("P/E 昂貴。預期大盤上檔受限，賣出上方買權收取時間價值。")
-        c1, c2 = st.columns(2)
-        c1.metric("1. 賣出 (Sell) 履約價", f"{round((current_index + delta_safety_dist) / 100) * 100}")
-        c2.metric("2. 買進 (Buy) 履約價", f"{round((current_index + delta_safety_dist) / 100) * 100 + 500}")
-    elif pe_val >= 21.0:
-        st.subheader("🎯 本週建議策略：🐂 Bull Put Spread (低檔收租)")
-        st.info("P/E 合理。趨勢穩健，賣出下方賣權收取權利金。")
-        c1, c2 = st.columns(2)
-        c1.metric("1. 賣出 (Sell) 履約價", f"{round((current_index - delta_safety_dist) / 100) * 100}")
-        c2.metric("2. 買進 (Buy) 履約價", f"{round((current_index - delta_safety_dist) / 100) * 100 - 500}")
+    st.header("🚀 選擇權每週戰情室 (TXO Weekly 動態對沖)")
+
+    # 1. 定義動態安全距離 (Volatility 防護網)
+    # 邏輯：P/E 越高，處於泡沫邊緣，波動率越大，安全距離必須強制拉開
+    base_distance = 500
+    if current_pe > 25.0:
+        base_distance = 700
+        st.warning("⚠️ 系統偵測：目前 P/E 處於高估值區，已自動將選擇權安全防護網拉寬至 700 點以上。")
+    elif current_pe < 20.0:
+        base_distance = 600
+
+    # 2. 核心戰略判定引擎 (現貨 Delta 偏離度對沖)
+    # 使用您的真實偏離度 (current_gap) 來決定本週策略
+    if current_gap >= 1.5:
+        # 戰略 A：正偏離準備觸發賣出 -> 啟動 Synthetic Covered Call
+        strategy_name = "Bear Call Spread (高空收租 / 預先鎖利)"
+        strategy_icon = "🐻"
+        strategy_desc = f"【狀態】現貨正偏離達 +{current_gap:.2f}%。現貨部位已超載上漲動能。\n\n【動作】在現貨觸發賣出閥值前，提前在上方賣出買權收租。大盤狂噴則現貨補貼期權；大盤回檔則權利金無風險落袋。"
+        
+        sell_strike = int(current_index + base_distance)
+        sell_strike = round(sell_strike / 100) * 100 # 四捨五入到百位數
+        buy_strike = sell_strike + 500 # 嚴格鎖定 500 點保證金風險
+
+    elif -1.0 <= current_gap < 1.5:
+        # 戰略 B：中性泥沼盤 -> 啟動 Iron Condor
+        strategy_name = "Iron Condor (鐵鷹策略 / 泥沼盤雙收)"
+        strategy_icon = "🦅"
+        strategy_desc = f"【狀態】現貨偏離度為 {current_gap:.2f}% (中性健康區間)。大盤目前缺乏單邊極端動能。\n\n【動作】啟動鐵鷹策略，在上下安全距離外同時建立部位，雙向收取 Theta 時間價值。這是死魚盤的最佳提款機。"
+        
+        # 鐵鷹 Call 邊
+        sell_call = int(current_index + base_distance + 100)
+        sell_call = round(sell_call / 100) * 100
+        buy_call = sell_call + 500
+        
+        # 鐵鷹 Put 邊
+        sell_put = int(current_index - base_distance - 100)
+        sell_put = round(sell_put / 100) * 100
+        buy_put = sell_put - 500
+
     else:
-        st.subheader("🛑 本週建議：❌ 戰略停火")
-        st.warning("目前估值偏低，應全力做多正二現貨，避免賣 Put 風險。")
+        # 戰略 C：負偏離 -> 啟動 Bull Put Spread
+        strategy_name = "Bull Put Spread (低檔防守收租)"
+        strategy_icon = "🐂"
+        strategy_desc = f"【狀態】現貨負偏離達 {current_gap:.2f}%。大盤近期回檔，估值壓力減輕。\n\n【動作】在下方賣出賣權。若大盤撐住，賺取權利金；若大盤續跌，等同於順勢增加多頭曝險，完美配合現貨逢低加碼邏輯。"
+        
+        sell_strike = int(current_index - base_distance)
+        sell_strike = round(sell_strike / 100) * 100
+        buy_strike = sell_strike - 500
+
+    # 3. 渲染戰略面板
+    st.markdown(f"### 🎯 本週建議策略：{strategy_icon} {strategy_name}")
+    st.info(strategy_desc)
+
+    # 4. 履約價顯示卡片
+    if "Iron Condor" in strategy_name:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("#### 📉 上方防守 (Bear Call)")
+            st.metric("賣出 (Sell) Call 履約價", f"{sell_call}")
+            st.metric("買進 (Buy) Call 履約價", f"{buy_call}")
+        with col2:
+            st.markdown("#### 📈 下方防守 (Bull Put)")
+            st.metric("賣出 (Sell) Put 履約價", f"{sell_put}")
+            st.metric("買進 (Buy) Put 履約價", f"{buy_put}")
+        st.error("🔒 系統鐵律：鐵鷹策略需動用雙邊保證金，請確認 00865B 子彈庫餘額充足，絕對不可動用 00713 質押額度！")
+    else:
+        col1, col2 = st.columns(2)
+        with col1:
+            target_sell_type = "Call" if "Bear" in strategy_name else "Put"
+            st.metric(f"賣出 (Sell) {target_sell_type} 履約價", f"{sell_strike}")
+        with col2:
+            target_buy_type = "Call" if "Bear" in strategy_name else "Put"
+            st.metric(f"買進 (Buy) {target_buy_type} 履約價", f"{buy_strike}")
+        st.error(f"🔒 系統鐵律：必須同時買進 {buy_strike} 進行價差鎖定，嚴禁裸賣！")
+
+    st.markdown("---")
+    st.markdown("💡 **量化副手提醒**：以上為系統靜態基準點。極端跳空日或重大數據發布前，請將最新 CSV 傳送給 AI 副手，進行當日『勝率評估』與『最佳建倉時機 (Theta/Vega 決策)』。")
 
 with tab4:
     st.title("🔮 蒙地卡羅未來資產推演 (AI-Optimized Gravity Model)")
