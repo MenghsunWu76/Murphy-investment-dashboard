@@ -9,7 +9,7 @@ from datetime import datetime
 import pytz
 
 # --- 1. 頁面基礎設定 ---
-st.set_page_config(page_title="A.D.E.I.S 真實財富戰情室 (v23.2 終極版)", layout="wide")
+st.set_page_config(page_title="A.D.E.I.S 全能自駕戰情室 (v24.0)", layout="wide")
 
 # --- 2. 歷史紀錄系統 (CSV 雲端保險箱) ---
 HISTORY_FILE = "asset_history.csv"
@@ -262,8 +262,10 @@ with st.sidebar:
         with open(HISTORY_FILE, "rb") as f: csv_bytes = f.read()
         st.download_button("📥 3. 下載最新備份", data=csv_bytes, file_name=f"ADEIS_Backup_{datetime.now(pytz.timezone('Asia/Taipei')).strftime('%Y%m%d')}.csv", mime="text/csv")
 
-# --- 7. 主畫面 ---
-tab1, tab2, tab3, tab4 = st.tabs(["📊 戰情室 Dashboard", "📖 現金流與 SOP", "🚀 選擇權戰情室", "🔮 蒙地卡羅未來推演"])
+# --- 7. 主畫面 (新增 Tab5 系統校準模組) ---
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📊 戰情室 Dashboard", "📖 現金流與 SOP", "🚀 選擇權戰情室", "🔮 蒙地卡羅未來推演", "⚖️ 系統校準與診斷"
+])
 
 with tab1:
     st.subheader("1. 動態戰略地圖")
@@ -372,7 +374,6 @@ with tab3:
         st.subheader("🛑 本週建議：❌ 戰略停火")
         st.warning("目前估值偏低，應全力做多正二現貨，避免賣 Put 風險。")
 
-# --- 8. 🔮 蒙地卡羅未來推演模組 (支援真實淨資產推演) ---
 with tab4:
     st.title("🔮 蒙地卡羅未來資產推演 (AI-Optimized Gravity Model)")
     st.markdown("基於您 **今日真實的資產配置** 與 **所有場外負債**，結合 AI 超級週期的總經環境，模擬未來 10,000 種平行宇宙的真實財富軌跡。")
@@ -421,10 +422,8 @@ with tab4:
             for t in range(1, steps):
                 price_paths[t] = price_paths[t-1] * daily_returns[t]
                 
-            # 計算真實淨資產軌跡 (扣除質押、房貸與信貸)
             true_net_paths = price_paths - loan_amount - mortgage_loan - personal_loan
             
-            # 斷頭判定 (以券商層級的維持率計算，不受房貸信貸影響)
             margin_call_threshold = loan_amount * 1.3
             ruin_paths = np.any(price_paths < margin_call_threshold, axis=0)
             ruin_prob = np.mean(ruin_paths) * 100
@@ -463,3 +462,71 @@ with tab4:
                 st.error("⚠️ **風險警告：** 您的斷頭機率高於 5%。建議調降質押借款，或增加防禦配置，再重新推演。")
             else:
                 st.success("✅ **系統評估：** 您的投資組合抗壓性極佳，請安心享受時間複利。")
+
+# --- 9. 🆕 Tab 5：系統年度校準與診斷 (Calibration Room) ---
+with tab5:
+    st.title("⚖️ 系統校準與診斷 (Calibration Room)")
+    st.markdown("自動比對雲端保險箱內的歷史軌跡，進行系統自我診斷與參數微調建議。建議每季檢視一次。")
+
+    if os.path.exists(HISTORY_FILE):
+        df_hist = pd.read_csv(HISTORY_FILE)
+        if len(df_hist) >= 2:
+            # 確保 'True_Net_Assets' 存在 (相容舊版 CSV)
+            if 'True_Net_Assets' not in df_hist.columns:
+                df_hist['True_Net_Assets'] = df_hist['Net_Assets'] if 'Net_Assets' in df_hist.columns else df_hist['Total_Assets']
+                
+            df_hist['Date'] = pd.to_datetime(df_hist['Date'])
+            df_hist = df_hist.sort_values('Date')
+
+            # 繪製歷史軌跡圖
+            fig_hist = px.line(df_hist, x='Date', y='True_Net_Assets', title="💎 真實淨資產歷史軌跡 (依據存檔紀錄)", markers=True)
+            fig_hist.update_layout(template="plotly_dark", yaxis_title="真實淨資產")
+            st.plotly_chart(fig_hist, use_container_width=True)
+
+            # 運算績效指標
+            start_date = df_hist['Date'].iloc[0]
+            end_date = df_hist['Date'].iloc[-1]
+            days_passed = (end_date - start_date).days
+            start_assets = df_hist['True_Net_Assets'].iloc[0]
+            end_assets = df_hist['True_Net_Assets'].iloc[-1]
+
+            if days_passed > 0 and start_assets > 0:
+                annualized_return = ((end_assets / start_assets) ** (365 / days_passed)) - 1
+            else:
+                annualized_return = 0
+
+            st.subheader("🕵️‍♂️ 系統歷史績效診斷")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("歷史追蹤期間", f"{days_passed} 天")
+            c2.metric("期間淨資產變化", f"${end_assets - start_assets:+,.0f}")
+            c3.metric("換算年化報酬率 (CAGR)", f"{annualized_return*100:.2f}%")
+
+            st.divider()
+
+            st.markdown("### 🛠️ 動態參數校準建議")
+            
+            # 診斷 1: 實際報酬率檢驗
+            st.markdown("#### 1. 成長動能檢測")
+            if days_passed < 90:
+                st.info("ℹ️ **樣本數不足**：追蹤時間未滿一季 (90天)，目前的年化報酬率可能因短期波動失真，請繼續累積存檔紀錄。")
+            else:
+                if annualized_return < 0.05:
+                    st.warning("⚠️ **動能遲緩警告**：過去年化報酬低於 5%。請檢查 00675L 是否因長期盤整產生嚴重『波動耗損』，或檢視您的摩擦成本是否過高。若確認目前為系統性熊市，請保持紀律等待復甦。")
+                elif annualized_return > 0.25:
+                    st.success("🔥 **超額報酬提示**：資產增長極速 (CAGR > 25%)！系統運作完美。請特別注意是否因獲利而導致『槓桿過度擴張』，並確保有確實將多餘資金鎖入 00865B 與 00713。")
+                else:
+                    st.info("✅ **健康巡航**：資產增長符合預期區間，請繼續保持動態擴容與波動率煞車的良好紀律。")
+
+            # 診斷 2: 槓桿成本(質押利率)校準
+            st.markdown("#### 2. 資金成本校準 ($r$)")
+            st.markdown("請輸入您**目前實際**的券商質押利率。系統將評估是否會吃掉正二的逆價差紅利：")
+            actual_rate = st.number_input("輸入目前實際質押年利率 (%)", value=2.5, step=0.1)
+            if actual_rate > 3.0:
+                st.error(f"🚨 **資金成本過高**：目前利率 {actual_rate}% 偏高。這將侵蝕您的投資組合期望值，建議尋求轉貸降息，或考慮放緩借款擴張速度。")
+            else:
+                st.success(f"✅ **資金成本健康**：利率 {actual_rate}% 非常優異。享有正二低成本槓桿優勢，請安心維持目前的戰略極限。")
+
+        else:
+            st.warning("⚠️ 歷史資料不足：需要至少 2 筆儲存紀錄，才能啟動趨勢診斷與校準。請在左側側邊欄點擊「儲存今日最新狀態」來累積紀錄。")
+    else:
+        st.warning("⚠️ 找不到歷史備份檔 (`asset_history.csv`)。系統目前無記憶，請先在左側進行第一次儲存。")
