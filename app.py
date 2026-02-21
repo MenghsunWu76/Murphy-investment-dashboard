@@ -9,7 +9,7 @@ from datetime import datetime
 import pytz
 
 # --- 1. 頁面基礎設定 ---
-st.set_page_config(page_title="A.D.E.I.S 真實財富戰情室 (v23.1)", layout="wide")
+st.set_page_config(page_title="A.D.E.I.S 真實財富戰情室 (v23.2 終極版)", layout="wide")
 
 # --- 2. 歷史紀錄系統 (CSV 雲端保險箱) ---
 HISTORY_FILE = "asset_history.csv"
@@ -211,10 +211,13 @@ else: target_attack_ratio, current_tier_index = tier_5, 5
 
 current_tier_name = ladder_data[current_tier_index]["位階"]
 current_attack_ratio = (val_attack / total_assets) * 100 if total_assets > 0 else 0
+
+# --- V23.2 核心：AI 動態擴容再平衡閥值 (Auto-Scaling Gap Tolerance) ---
 if true_net_assets < 10000000:
-    gap_tolerance = 3.0  # 累積期：高靈敏度
+    gap_tolerance = 3.0  # 累積期：高靈敏度，緊咬市場波動
 else:
-    gap_tolerance = 5.0  # 守成期：低摩擦成本 
+    gap_tolerance = 5.0  # 守成期：低摩擦成本，忽略小震盪
+
 gap = current_attack_ratio - target_attack_ratio
 
 max_allowed_exposure_kelly = portfolio_net_assets * (safe_leverage_limit / 100.0)
@@ -291,7 +294,7 @@ with tab1:
 
     st.divider()
     
-    # [優化] 自訂欄位寬度比例，完美展開百萬/千萬級數字
+    # 完美展開百萬/千萬級數字的寬度設定
     st.subheader("3. 投資組合核心數據")
     col1, col2, col3, col4, col5, col6 = st.columns([1.5, 1.5, 0.8, 1.0, 1.0, 1.0])
     
@@ -325,7 +328,7 @@ with tab1:
         else:
             if gap > gap_tolerance: st.warning(f"🔴 **賣出訊號** (+{gap:.1f}%)\n賣出：${val_attack - (total_assets * target_attack_ratio / 100):,.0f} 轉入子彈庫")
             elif gap < -gap_tolerance: st.success(f"🟢 **買進訊號** ({gap:.1f}%)\n動用：${(total_assets * target_attack_ratio / 100) - val_attack:,.0f} 買進正二")
-            else: st.success(f"✅ **系統待機**\n財務健康且無偏離。\n容忍度: +/- {gap_tolerance}%")
+            else: st.success(f"✅ **系統待機**\n財務健康且無偏離。\n動態容忍度: +/- {gap_tolerance}%")
 
 with tab2:
     st.title("📖 A.D.E.I.S 實戰教戰守則 (無息子彈庫版)")
@@ -343,6 +346,11 @@ with tab2:
     ### 🚨 V22 波動率煞車機制說明
     系統會自動抓取台股近 60 日真實波動率，並套用連續時間凱利公式：$f^* = (市場報酬 - 槓桿成本) / 波動率^2$。
     如果遇到股災，雖然 P/E 變便宜，但若當下市場極度恐慌、波動率飆升，系統會強制將您的槓桿上限下修。**寧可少賺反彈第一段，也絕不在高波動中被震出場。**
+    
+    ### ⚖️ V23.2 動態擴容閥值 (Auto-Scaling)
+    系統會依據您的「真實淨資產」自動切換容忍度：
+    * **< 1,000萬**：容忍度 **3%** (積極累積，靈活追蹤波段)。
+    * **> 1,000萬**：容忍度 **5%** (沉穩守成，減少法人級量體的摩擦手續費)。
     """)
 
 with tab3:
