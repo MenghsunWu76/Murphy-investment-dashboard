@@ -9,9 +9,9 @@ from datetime import datetime
 import pytz
 
 # --- 1. 頁面基礎設定 ---
-st.set_page_config(page_title="A.D.E.I.S 波動率煞車戰情室 (v22.0)", layout="wide")
+st.set_page_config(page_title="A.D.E.I.S 旗艦波動率戰情室 (v22.0)", layout="wide")
 
-# --- 2. 歷史紀錄系統 ---
+# --- 2. 歷史紀錄系統 (CSV 雲端保險箱) ---
 HISTORY_FILE = "asset_history.csv"
 
 def load_last_record():
@@ -33,19 +33,18 @@ def save_record(data_dict):
         except:
             new_df.to_csv(HISTORY_FILE, mode='a', header=False, index=False)
 
-# --- 3. 自動抓取引擎 (新增波動率計算) ---
+# --- 3. 自動抓取引擎 (新增即時波動率偵測) ---
 @st.cache_data(ttl=3600)
 def get_market_data():
-    data = {"ath": 32996.0, "pe_0050": None, "current_vol": 0.20} # 預設波動率20%
+    data = {"ath": 32996.0, "pe_0050": None, "current_vol": 0.20}
     try:
         hist = yf.Ticker("^TWII").history(period="5y")
         if not hist.empty: 
             data["ath"] = float(hist['High'].max())
-            # 計算近 60 交易日的年化波動率
+            # 計算近 60 日真實年化波動率
             recent_hist = hist.tail(60)
             daily_returns = recent_hist['Close'].pct_change().dropna()
             data["current_vol"] = float(daily_returns.std() * np.sqrt(252))
-            
         etf_50 = yf.Ticker("0050.TW")
         if 'trailingPE' in etf_50.info: data["pe_0050"] = etf_50.info['trailingPE']
     except: pass
@@ -67,6 +66,7 @@ init_state('input_ath', ath_auto)
 init_state('input_index', 31346.0)
 init_state('input_pe', 26.5)
 
+# 黃金四角配置預設值
 defaults = {
     'p_675': 185.0, 's_675': 11000, 'p_631': 466.7, 's_631': 331,
     'p_670': 157.95, 's_670': 616, 'p_662': 102.25, 's_662': 25840,
@@ -92,21 +92,24 @@ with st.sidebar:
                 st.toast("✅ 成功載入！", icon="📂")
                 st.rerun()
             except Exception as e: st.error(f"載入失敗: {e}")
-        else: st.warning("⚠️ 雲端無紀錄，請先上傳備份檔。")
+        else: st.warning("⚠️ 雲端目前無紀錄，請先上傳您的備份檔。")
 
-    with st.expander("0. 市場位階與風險平價引擎", expanded=True):
+    with st.expander("0. 市場位階 & 雙引擎煞車系統", expanded=True):
         col_ath1, col_ath2 = st.columns([2, 1])
         with col_ath1: st.metric("自動 ATH", f"{ath_auto:,.0f}")
         with col_ath2: use_manual_ath = st.checkbox("修正", key="manual_ath_check")
         final_ath = st.number_input("輸入 ATH", step=10.0, format="%.0f", key="input_ath") if use_manual_ath else ath_auto
         
+        st.markdown("---")
         current_index = st.number_input("今日大盤點數", step=10.0, format="%.0f", key="input_index")
         mdd_pct = ((final_ath - current_index) / final_ath) * 100 if final_ath > 0 else 0.0
+        st.info(f"📉 目前 MDD: {mdd_pct:.2f}%")
         
         st.markdown("---")
-        pe_val = st.number_input("輸入大盤 P/E", step=0.1, key="input_pe")
-        
-        # --- 核心優化：雙引擎限速器 ---
+        if pe_0050_ref: st.caption(f"參考: 0050 PE {pe_0050_ref:.2f}")
+        pe_val = st.number_input("輸入大盤 P/E (決定估值上限)", step=0.1, key="input_pe")
+
+        # --- V22 核心：雙引擎限速器 ---
         # 1. 估值限速 (PE Limit)
         pe_limit = 160
         if pe_val < 17.0: pe_limit = 320
@@ -115,21 +118,20 @@ with st.sidebar:
         elif pe_val < 23.0: pe_limit = 200
         
         # 2. 波動率限速 (動態凱利公式)
-        market_mu = 0.1415 # 長期台股報酬率預設
-        leverage_cost = 0.015 # 槓桿成本
-        safe_vol = max(real_volatility, 0.15) # 避免低波動時算出無限大槓桿，設底線 15%
+        market_mu = 0.1415 
+        leverage_cost = 0.015 
+        safe_vol = max(real_volatility, 0.15) 
         kelly_limit = ((market_mu - leverage_cost) / (safe_vol ** 2)) * 100
         
-        # 3. 最終安全上限：取兩者最嚴格者
+        # 3. 最終安全上限
         safe_leverage_limit = min(pe_limit, kelly_limit)
-        
-        st.info(f"📊 近 60 日真實波動率: {real_volatility*100:.1f}%")
+
         st.caption(f"📍 P/E 戰略上限: {pe_limit}%")
-        st.caption(f"📍 凱利波動極限: {kelly_limit:.0f}%")
+        st.caption(f"📍 凱利波動極限: {kelly_limit:.0f}% (VIX: {real_volatility*100:.1f}%)")
         if kelly_limit < pe_limit:
-            st.warning(f"🚨 **波動率煞車啟動！最終安全上限: {safe_leverage_limit:.0f}%**")
+            st.warning(f"🚨 **波動率煞車啟動！最終上限: {safe_leverage_limit:.0f}%**")
         else:
-            st.success(f"🛡️ **估值控管中。最終安全上限: {safe_leverage_limit:.0f}%**")
+            st.success(f"🛡️ **估值控管中。最終上限: {safe_leverage_limit:.0f}%**")
 
         st.markdown("---")
         base_exposure = st.number_input("基準曝險 % (Tier 1)", value=23.0, min_value=20.0, max_value=30.0, step=1.0)
@@ -215,10 +217,21 @@ if exposure_gap < 0:
 else:
     recommendation_action, recommendation_amount = "BORROW", min(exposure_gap / 2, loan_headroom)
 
+last_record = load_last_record()
+diff_total = total_assets - last_record['Total_Assets'] if last_record is not None else 0
+last_date_str = last_record['Date'] if last_record is not None else "無紀錄"
+
 with st.sidebar:
     st.markdown("---")
     st.subheader("💾 雲端保險箱")
-    if st.button("💾 儲存今日最新狀態", type="primary"):
+    uploaded_file = st.file_uploader("📤 1. 恢復記憶 (上傳歷史 CSV)", type=["csv"])
+    if uploaded_file is not None:
+        try:
+            pd.read_csv(uploaded_file).to_csv(HISTORY_FILE, index=False)
+            st.success("✅ 記憶已恢復！請點擊上方載入")
+        except Exception as e: st.error(f"上傳失敗: {e}")
+
+    if st.button("💾 2. 儲存今日最新狀態", type="primary"):
         now_str = datetime.now(pytz.timezone('Asia/Taipei')).strftime("%Y-%m-%d %H:%M")
         save_data = {
             "Date": now_str, "Total_Assets": total_assets, "Net_Assets": net_assets,
@@ -229,9 +242,13 @@ with st.sidebar:
         save_record(save_data)
         st.success(f"已儲存！時間: {now_str}")
         st.rerun()
+    
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "rb") as f: csv_bytes = f.read()
+        st.download_button("📥 3. 下載最新備份", data=csv_bytes, file_name=f"ADEIS_Backup_{datetime.now(pytz.timezone('Asia/Taipei')).strftime('%Y%m%d')}.csv", mime="text/csv")
 
 # --- 7. 主畫面 ---
-tab1, tab2, tab3, tab4 = st.tabs(["📊 戰情室 Dashboard", "📖 煞車機制說明", "🚀 選擇權戰情室", "🔮 蒙地卡羅未來推演"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 戰情室 Dashboard", "📖 現金流與 SOP", "🚀 選擇權戰情室 (TXO)", "🔮 蒙地卡羅未來推演"])
 
 with tab1:
     st.subheader("1. 動態戰略地圖")
@@ -246,9 +263,10 @@ with tab1:
         st.dataframe(df_ladder.style.apply(highlight_current_row, axis=1).format({"目標曝險": "{:.0f}%"}), hide_index=True, use_container_width=True)
 
     st.divider()
+    
     st.subheader("2. 💰 資金水位與額度試算 (Liquidity Check)")
     liq_c1, liq_c2, liq_c3 = st.columns(3)
-    liq_c1.metric("🛡️ 最終安全限額", f"{safe_leverage_limit:.0f}%")
+    liq_c1.metric("🛡️ 最終安全限額", f"{safe_leverage_limit:.0f}%", help="由估值與真實波動率兩者中最嚴格者決定")
     liq_c1.progress(min(real_leverage_ratio / safe_leverage_limit if safe_leverage_limit>0 else 1.0, 1.0), text=f"目前使用率: {real_leverage_ratio:.1f}%")
     
     liq_c2.metric("🏦 券商限額 (U<35%)", f"$ {max_loan_broker:,.0f}")
@@ -262,17 +280,20 @@ with tab1:
     st.divider()
     st.subheader("3. 投資組合核心數據")
     col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("💰 資產總市值 (I)", f"${total_assets:,.0f}")
+    col1.metric("💰 資產總市值 (I)", f"${total_assets:,.0f}", delta=f"${diff_total:,.0f}")
     col2.metric("📉 整體 Beta 值", f"{portfolio_beta:.2f}")
     col3.metric("⚙️ 實質槓桿率", f"{real_leverage_ratio:.1f}%", delta="⚠️ 超速" if real_leverage_ratio > safe_leverage_limit else "✅ 安全", delta_color="inverse" if real_leverage_ratio > safe_leverage_limit else "normal")
     col4.metric("🛡️ 整戶維持率 (T)", f"{maintenance_ratio:.0f}%", delta="安全線 > 300%", delta_color="inverse" if maintenance_ratio < 300 else "normal")
     col5.metric("💳 質押負債比 (U)", f"{loan_ratio:.1f}%", delta="安全線 < 35%", delta_color="inverse" if loan_ratio > 35 else "normal")
 
     st.divider()
+    
+    st.subheader("4. 資產配置與指令")
     c1, c2 = st.columns([2, 1])
     with c1:
         chart_data = pd.DataFrame({'資產類別': ['攻擊型', '核心', '防禦', '子彈庫'], '市值': [val_attack, val_core, val_defense, val_ammo]})
         fig = px.pie(chart_data, values='市值', names='資產類別', color='資產類別', color_discrete_map={'攻擊型': '#FF4B4B', '核心': '#FFD700', '防禦': '#2E8B57', '子彈庫': '#87CEFA'}, hole=0.45)
+        fig.update_traces(textposition='inside', textinfo='percent+label')
         st.plotly_chart(fig, use_container_width=True)
 
     with c2:
@@ -283,23 +304,141 @@ with tab1:
         if real_leverage_ratio > safe_leverage_limit: risk_msgs.append(f"⚠️ 槓桿超速 (限 {safe_leverage_limit:.0f}%)")
 
         if maintenance_ratio < 250: st.error("⛔ **紅色警戒**\n\n維持率危險！禁止買進，賣股還債。")
-        elif len(risk_msgs) > 0: st.warning(f"🟠 **風險提示**\n\n{chr(10).join(risk_msgs)}\n\n**指令：考慮減碼。**")
+        elif len(risk_msgs) > 0:
+            st.warning(f"🟠 **風險提示**\n\n{chr(10).join(risk_msgs)}\n\n**指令：禁止加碼，考慮減碼。**")
         else:
             if gap > gap_tolerance: st.warning(f"🔴 **賣出訊號** (+{gap:.1f}%)\n賣出：${val_attack - (total_assets * target_attack_ratio / 100):,.0f} 轉入子彈庫")
             elif gap < -gap_tolerance: st.success(f"🟢 **買進訊號** ({gap:.1f}%)\n動用：${(total_assets * target_attack_ratio / 100) - val_attack:,.0f} 買進正二")
-            else: st.success(f"✅ **系統待機**\n財務健康且無偏離。")
+            else: st.success(f"✅ **系統待機**\n財務健康且無偏離。\n容忍度: +/- {gap_tolerance}%")
 
 with tab2:
-    st.title("📖 V22 波動率煞車機制說明")
+    st.title("📖 A.D.E.I.S 實戰教戰守則 (無息子彈庫版)")
     st.markdown("""
-    系統會自動抓取台股近 60 日波動率，並套用連續時間凱利公式：
-    * $f^* = (市場報酬 - 槓桿成本) / 波動率^2$
+    ### 🌊 現金流瀑布模型 (由上而下分配)
+    *(註：00865B 為純資金池不配息，現金流主要來自 00713 股息與 TXO 收租)*
     
-    如果遇到股災，雖然 P/E 變便宜（允許開 320%），但若當下市場極度恐慌、波動率飆升，系統會強制將您的槓桿上限下修（例如降至 150%）。**寧可少賺反彈的第一段，也絕不在高波動中被震出場。**
+    1. **第一層 (生存線)**：預留足夠扣繳未來數月「質押利息」的現金，達成零成本槓桿。
+    2. **第二層 (降壓防禦)**：若 U值 > 35% 或 P/E > 26.5，剩下的錢全數拿去「償還本金」。
+    3. **第三層 (估值再投資)**：若護城河安全，看 P/E 燈號買進：
+       * 🔴 P/E > 25 (貴) ➔ 買 **00865B** 或 **00713** (囤積子彈庫)。
+       * 🟡 P/E 21~25 (普) ➔ 買 **00662** (擴張美股核心)。
+       * 🟢 P/E < 21 (俗) ➔ 買 **00675L** (低檔火力全開)。
+       
+    ### 🚨 V22 波動率煞車機制說明
+    系統會自動抓取台股近 60 日真實波動率，並套用連續時間凱利公式：$f^* = (市場報酬 - 槓桿成本) / 波動率^2$。
+    如果遇到股災，雖然 P/E 變便宜，但若當下市場極度恐慌、波動率飆升，系統會強制將您的槓桿上限下修。**寧可少賺反彈第一段，也絕不在高波動中被震出場。**
     """)
 
-# V21.1 既有的選擇權與蒙地卡羅模組維持不變 (省略顯示以節省版面，請直接沿用您既有的 Tab3, Tab4 程式碼)
 with tab3:
-    st.info("🚀 選擇權每週戰情室 (維持原設定)")
+    st.title("🚀 選擇權每週戰情室 (TXO Weekly)")
+    delta_safety_dist = current_index * 0.025
+    if pe_val >= 24.0:
+        st.subheader("🎯 本週建議策略：🐻 Bear Call Spread (高空收租)")
+        st.info("P/E 昂貴。預期大盤上檔受限，賣出上方買權收取時間價值。")
+        c1, c2 = st.columns(2)
+        c1.metric("1. 賣出 (Sell) 履約價", f"{round((current_index + delta_safety_dist) / 100) * 100}")
+        c2.metric("2. 買進 (Buy) 履約價", f"{round((current_index + delta_safety_dist) / 100) * 100 + 500}")
+    elif pe_val >= 21.0:
+        st.subheader("🎯 本週建議策略：🐂 Bull Put Spread (低檔收租)")
+        st.info("P/E 合理。趨勢穩健，賣出下方賣權收取權利金。")
+        c1, c2 = st.columns(2)
+        c1.metric("1. 賣出 (Sell) 履約價", f"{round((current_index - delta_safety_dist) / 100) * 100}")
+        c2.metric("2. 買進 (Buy) 履約價", f"{round((current_index - delta_safety_dist) / 100) * 100 - 500}")
+    else:
+        st.subheader("🛑 本週建議：❌ 戰略停火")
+        st.warning("目前估值偏低，應全力做多正二現貨，避免賣 Put 風險。")
+
+# --- 8. 🔮 蒙地卡羅未來推演模組 (AI 信仰動態引力版) ---
 with tab4:
-    st.info("🔮 蒙地卡羅未來推演 (維持 V21.1 設定)")
+    st.title("🔮 蒙地卡羅未來資產推演 (AI-Optimized Gravity Model)")
+    st.markdown("基於您 **今日真實的資產配置** 與 **借款金額**，結合 AI 超級週期的總經環境，模擬未來 10,000 種平行宇宙的財富軌跡。")
+    
+    with st.expander("⚙️ 總體經濟動態最佳化 (Dynamic Macro Optimization)", expanded=True):
+        w_atk, w_cor = val_attack/total_assets if total_assets>0 else 0, val_core/total_assets if total_assets>0 else 0
+        w_def, w_amo = val_defense/total_assets if total_assets>0 else 0, val_ammo/total_assets if total_assets>0 else 0
+        
+        # --- 核心優化：AI 信仰與估值引力模型 ---
+        pe_baseline = 22.0  # 承認台股 AI 時代的價值提升，基準線由 15 上調至 22
+        safe_pe_val = max(min(pe_val, 30.0), 15.0) 
+        
+        # 1. 報酬率引力乘數：敬畏估值，但不悲觀。P/E 高於 22 會溫和打折。
+        mu_multiplier = pe_baseline / safe_pe_val
+        # 2. 波動率引力乘數：深跌(MDD)或過熱(PE>24)都會增加波動。
+        vol_multiplier = 1.0 + (mdd_pct / 100.0) + (max(safe_pe_val - 24.0, 0) / 40.0)
+
+        # 賦予 AI 信仰的高底氣基準：正二 24%，核心納斯達克 14% (乘以引力修正)
+        adj_atk_mu = 0.24 * mu_multiplier
+        adj_cor_mu = 0.14 * ((mu_multiplier + 1.0) / 2)
+        
+        default_mu = (w_atk * adj_atk_mu) + (w_cor * adj_cor_mu) + (w_def * 0.08) + (w_amo * 0.04)
+        default_vol = ((w_atk * 0.40) + (w_cor * 0.22) + (w_def * 0.12) + (w_amo * 0.03)) * vol_multiplier
+        
+        st.markdown(f"🧠 **AI 引擎自動判定**：大盤目前 P/E 為 `{pe_val}` (基準為 22.0)。系統已為您客觀計算出：")
+        st.markdown(f"- 預期報酬率乘數：`{mu_multiplier:.2f}` 倍 (不過度悲觀，保留 AI 動能)")
+        st.markdown(f"- 波動率風險乘數：`{vol_multiplier:.2f}` 倍")
+        
+        st.divider()
+        c_mu, c_vol = st.columns(2)
+        port_mu = c_mu.slider("最佳化投資組合 年化報酬率 (CAGR)", min_value=0.0, max_value=0.40, value=float(default_mu), step=0.01, format="%.2f")
+        port_vol = c_vol.slider("最佳化投資組合 年化波動率 (Volatility)", min_value=0.05, max_value=0.50, value=float(default_vol), step=0.01, format="%.2f")
+    
+    mc_years = st.slider("🕰️ 選擇推演時間軸 (Years)", min_value=1, max_value=20, value=5, step=1)
+    
+    if st.button("🚀 啟動 10,000 次平行宇宙推演", type="primary"):
+        with st.spinner(f"正在運算未來 {mc_years} 年的 10,000 種可能性..."):
+            np.random.seed(42) 
+            num_simulations = 10000
+            steps = mc_years * 12 # 每月結算
+            dt = 1 / 12
+            
+            Z = np.random.normal(0, 1, (steps, num_simulations))
+            drift = (port_mu - 0.5 * port_vol**2) * dt
+            diffusion = port_vol * np.sqrt(dt) * Z
+            daily_returns = np.exp(drift + diffusion)
+            
+            price_paths = np.zeros_like(daily_returns)
+            price_paths[0] = total_assets
+            for t in range(1, steps):
+                price_paths[t] = price_paths[t-1] * daily_returns[t]
+                
+            net_paths = price_paths - loan_amount
+            
+            # 斷頭判定
+            margin_call_threshold = loan_amount * 1.3
+            ruin_paths = np.any(price_paths < margin_call_threshold, axis=0)
+            ruin_prob = np.mean(ruin_paths) * 100
+            
+            final_net_assets = net_paths[-1, ~ruin_paths]
+            
+            if len(final_net_assets) > 0:
+                p05 = np.percentile(final_net_assets, 5)
+                p50 = np.percentile(final_net_assets, 50)
+                p95 = np.percentile(final_net_assets, 95)
+            else:
+                p05 = p50 = p95 = 0
+
+            sample_paths = net_paths[:, np.random.choice(num_simulations, 100, replace=False)]
+            time_axis = np.linspace(0, mc_years, steps)
+            
+            fig = go.Figure()
+            for i in range(100):
+                fig.add_trace(go.Scatter(x=time_axis, y=sample_paths[:, i], mode='lines', line=dict(color='rgba(135, 206, 250, 0.1)'), showlegend=False))
+            
+            median_path = np.median(net_paths, axis=1)
+            fig.add_trace(go.Scatter(x=time_axis, y=median_path, mode='lines', line=dict(color='#FFD700', width=3), name='中位數預期'))
+            fig.add_trace(go.Scatter(x=[0, mc_years], y=[net_assets, net_assets], mode='lines', line=dict(color='#FF4B4B', width=2, dash='dash'), name='目前淨資產起點'))
+            
+            fig.update_layout(title=f"未來 {mc_years} 年淨資產推演 (抽樣 100 條路徑)", xaxis_title="年度", yaxis_title="淨資產 (台幣)", template="plotly_dark")
+            st.plotly_chart(fig, use_container_width=True)
+            
+            st.subheader("📊 家族傳承機率報告")
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric(f"💀 斷頭/破產機率", f"{ruin_prob:.2f}%", help="未來任一月份維持率跌破 130% 的機率")
+            r2.metric(f"⛈️ 最差 5% (悲觀)", f"${p05:,.0f}", help="運氣極差，遇到長期空頭的情況")
+            r3.metric(f"⛅ 中位數 (標準)", f"${p50:,.0f}", help="最有可能發生的財富落點")
+            r4.metric(f"☀️ 最佳 5% (樂觀)", f"${p95:,.0f}", help="AI 超級週期延續，運氣極佳的情況")
+            
+            if ruin_prob > 5.0:
+                st.error("⚠️ **風險警告：** 您的斷頭機率高於 5%。建議在「戰情室 Dashboard」中調降 U值 (償還借款) 或增加防禦配置，再重新推演。")
+            else:
+                st.success("✅ **系統評估：** 您的投資組合抗壓性極佳，幾乎免疫黑天鵝造成的斷頭風險，請安心享受時間複利。")
