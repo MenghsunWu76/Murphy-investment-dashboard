@@ -236,14 +236,18 @@ diff_total = true_net_assets - (last_record['True_Net_Assets'] if last_record is
 last_date_str = last_record['Date'] if last_record is not None else "無紀錄"
 
 with st.sidebar:
-    st.markdown("---")
-    st.subheader("💾 雲端保險箱")
-    uploaded_file = st.file_uploader("📤 1. 恢復記憶 (上傳歷史 CSV)", type=["csv"])
-    if uploaded_file is not None:
-        try:
-            pd.read_csv(uploaded_file).to_csv(HISTORY_FILE, index=False)
-            st.success("✅ 記憶已恢復！請點擊上方載入")
-        except Exception as e: st.error(f"上傳失敗: {e}")
+        st.markdown("---")
+        st.subheader("💾 雲端保險箱")
+        uploaded_file = st.file_uploader("📤 1. 恢復記憶 (上傳歷史 CSV)", type=["csv"])
+        
+        # 👑 新增保險栓：必須按下確認按鈕，才執行覆寫，避免 rerun 時無限洗掉新存檔
+        if uploaded_file is not None:
+            if st.button("📥 確認匯入此備份檔"):
+                try:
+                    pd.read_csv(uploaded_file).to_csv(HISTORY_FILE, index=False)
+                    st.success("✅ 記憶已恢復！請點擊最上方『載入線上最新數據』")
+                except Exception as e: 
+                    st.error(f"上傳失敗: {e}")
 
     if st.button("💾 2. 儲存今日最新狀態", type="primary"):
         now_str = datetime.now(pytz.timezone('Asia/Taipei')).strftime("%Y-%m-%d %H:%M")
