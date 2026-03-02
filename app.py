@@ -62,7 +62,7 @@ def init_state(key, default_value):
 
 init_state('manual_ath_check', False)
 init_state('input_ath', ath_auto)
-init_state('input_index', 35600.0) # 預設更新為較新點位
+init_state('input_index', 35600.0) 
 init_state('input_pe', 23.5)
 init_state('mortgage_loan', 3000000.0)
 init_state('personal_loan', 1336066.0)
@@ -123,7 +123,7 @@ with st.sidebar:
         
         # 2. 波動率限速 (動態凱利公式)
         market_mu = 0.1415 
-        leverage_cost = 0.025 # 更新質押成本預估
+        leverage_cost = 0.025 
         safe_vol = max(real_volatility, 0.15) 
         kelly_limit = ((market_mu - leverage_cost) / (safe_vol ** 2)) * 100
         
@@ -217,9 +217,9 @@ current_attack_ratio = (val_attack / total_assets) * 100 if total_assets > 0 els
 
 # --- V23.2 核心：AI 動態擴容再平衡閥值 (Auto-Scaling Gap Tolerance) ---
 if true_net_assets < 10000000:
-    gap_tolerance = 3.0  # 累積期：高靈敏度，緊咬市場波動
+    gap_tolerance = 3.0  
 else:
-    gap_tolerance = 5.0  # 守成期：低摩擦成本，忽略小震盪
+    gap_tolerance = 5.0  
 
 gap = current_attack_ratio - target_attack_ratio
 
@@ -236,7 +236,6 @@ else:
 
 last_record = load_last_record()
 diff_total = true_net_assets - (last_record['True_Net_Assets'] if last_record is not None and 'True_Net_Assets' in last_record else portfolio_net_assets)
-last_date_str = last_record['Date'] if last_record is not None else "無紀錄"
 
 # --- 側邊欄：已修復的雲端保險箱邏輯 ---
 with st.sidebar:
@@ -244,7 +243,6 @@ with st.sidebar:
     st.subheader("💾 雲端保險箱")
     uploaded_file = st.file_uploader("📤 1. 恢復記憶 (上傳歷史 CSV)", type=["csv"])
     
-    # 【關鍵修復點】：加入按鈕保險栓，防止自動覆蓋
     if uploaded_file is not None:
         if st.button("📥 確認匯入此備份檔", type="primary"):
             try:
@@ -270,7 +268,7 @@ with st.sidebar:
         with open(HISTORY_FILE, "rb") as f: csv_bytes = f.read()
         st.download_button("📥 3. 下載最新備份", data=csv_bytes, file_name=f"ADEIS_Backup_{datetime.now(pytz.timezone('Asia/Taipei')).strftime('%Y%m%d')}.csv", mime="text/csv")
 
-# --- 7. 主畫面 (新增 Tab5 系統校準模組) ---
+# --- 7. 主畫面 ---
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 戰情室 Dashboard", "📖 現金流與 SOP", "🚀 選擇權戰情室 (v25)", "🔮 蒙地卡羅未來推演", "⚖️ 系統校準與診斷"
 ])
@@ -283,7 +281,13 @@ with tab1:
     m3.metric("🎯 當前目標曝險", f"{target_attack_ratio:.0f}%", help=f"位階: {current_tier_name}")
     
     df_ladder = pd.DataFrame(ladder_data)
-    def highlight_current_row(row): return ['background-color: #3b0000' if row['位階'] == current_tier_name else '' for _ in row] # 改為暗色系相容
+    
+    # 修正 MDD 區間表格高亮顯示：使用 rgba 提供更清晰的半透明紅色，且字體加粗
+    def highlight_current_row(row): 
+        if row['位階'] == current_tier_name:
+            return ['background-color: rgba(255, 75, 75, 0.4); font-weight: bold; color: white;' for _ in row]
+        return ['' for _ in row]
+        
     with m4:
         st.dataframe(df_ladder.style.apply(highlight_current_row, axis=1).format({"目標曝險": "{:.0f}%"}), hide_index=True, use_container_width=True)
 
@@ -361,9 +365,6 @@ with tab2:
     * **> 1,000萬**：容忍度 **5%** (沉穩守成，減少法人級量體的摩擦手續費)。
     """)
 
-# ==========================================
-# 🚀 V25 Tab 3: Alpha 選擇權導航中樞
-# ==========================================
 with tab3:
     st.header("🚀 選擇權每週戰情室 (TXO Weekly 動態對沖)")
 
@@ -460,7 +461,7 @@ with tab4:
         with st.spinner(f"正在運算未來 {mc_years} 年的 10,000 種可能性..."):
             np.random.seed(42) 
             num_simulations = 10000
-            steps = mc_years * 12 # 每月結算
+            steps = mc_years * 12 
             dt = 1 / 12
             
             Z = np.random.normal(0, 1, (steps, num_simulations))
@@ -504,7 +505,8 @@ with tab4:
             
             st.subheader("📊 家族傳承真實財富報告")
             r1, r2, r3, r4 = st.columns(4)
-            r1.metric(f"💀 質 এশিয়ার斷頭機率", f"{ruin_prob:.2f}%", help="未來任一月份券商維持率跌破 130% 的機率")
+            # 修正了第四分頁的亂碼錯字
+            r1.metric(f"💀 質押斷頭機率", f"{ruin_prob:.2f}%", help="未來任一月份券商維持率跌破 130% 的機率")
             r2.metric(f"⛈️ 最差 5% 真實財富", f"${p05:,.0f}", help="運氣極差情況下扣除所有負債後的剩餘淨值")
             r3.metric(f"⛅ 中位數 真實財富", f"${p50:,.0f}", help="最有可能發生的真實財富落點")
             r4.metric(f"☀️ 最佳 5% 真實財富", f"${p95:,.0f}", help="AI 超級週期延續情況下的真實財富")
