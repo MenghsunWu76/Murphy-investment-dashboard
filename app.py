@@ -62,15 +62,15 @@ def init_state(key, default_value):
 
 init_state('manual_ath_check', False)
 init_state('input_ath', ath_auto)
-init_state('input_index', 31346.0)
-init_state('input_pe', 26.5)
-init_state('mortgage_loan', 0.0)
-init_state('personal_loan', 0.0)
+init_state('input_index', 35600.0) # 預設更新為較新點位
+init_state('input_pe', 23.5)
+init_state('mortgage_loan', 3000000.0)
+init_state('personal_loan', 1336066.0)
 
 defaults = {
-    'p_675': 185.0, 's_675': 11000, 'p_631': 466.7, 's_631': 331,
-    'p_670': 157.95, 's_670': 616, 'p_662': 102.25, 's_662': 25840,
-    'p_713': 52.10, 's_713': 66000, 'p_865': 47.51, 's_865': 10000
+    'p_675': 212.8, 's_675': 10000, 'p_631': 466.7, 's_631': 331,
+    'p_670': 157.95, 's_670': 616, 'p_662': 101.35, 's_662': 29840,
+    'p_713': 54.0, 's_713': 67000, 'p_865': 47.36, 's_865': 16000
 }
 for k, v in defaults.items(): init_state(k, v)
 
@@ -105,6 +105,9 @@ with st.sidebar:
         st.markdown("---")
         current_index = st.number_input("今日大盤點數", step=10.0, format="%.0f", key="input_index")
         mdd_pct = ((final_ath - current_index) / final_ath) * 100 if final_ath > 0 else 0.0
+        
+        # 避免大盤創新高時 MDD 變成負的
+        if mdd_pct < 0: mdd_pct = 0.0
         st.info(f"📉 目前 MDD: {mdd_pct:.2f}%")
         
         st.markdown("---")
@@ -120,7 +123,7 @@ with st.sidebar:
         
         # 2. 波動率限速 (動態凱利公式)
         market_mu = 0.1415 
-        leverage_cost = 0.015 
+        leverage_cost = 0.025 # 更新質押成本預估
         safe_vol = max(real_volatility, 0.15) 
         kelly_limit = ((market_mu - leverage_cost) / (safe_vol ** 2)) * 100
         
@@ -164,9 +167,9 @@ with st.sidebar:
         s_865 = c2.number_input("00865B 股數", step=1000, key="s_865")
 
     st.subheader("5. 負債監控 (券商與場外)")
-    loan_amount = st.number_input("🏦 目前質押借款總額", value=2350000, step=10000)
-    mortgage_loan = st.number_input("🏠 房屋增貸未還餘額", key="mortgage_loan", step=10000)
-    personal_loan = st.number_input("💳 信貸未還餘額", key="personal_loan", step=10000)
+    loan_amount = st.number_input("🏦 目前質押借款總額", value=2350000.0, step=10000.0)
+    mortgage_loan = st.number_input("🏠 房屋增貸未還餘額", key="mortgage_loan", step=10000.0)
+    personal_loan = st.number_input("💳 信貸未還餘額", key="personal_loan", step=10000.0)
 
 # --- 6. 運算引擎 ---
 v_675, v_631, v_670 = p_675 * s_675, p_631 * s_631, p_670 * s_670
@@ -235,15 +238,20 @@ last_record = load_last_record()
 diff_total = true_net_assets - (last_record['True_Net_Assets'] if last_record is not None and 'True_Net_Assets' in last_record else portfolio_net_assets)
 last_date_str = last_record['Date'] if last_record is not None else "無紀錄"
 
+# --- 側邊欄：已修復的雲端保險箱邏輯 ---
 with st.sidebar:
-        st.markdown("---")
-        st.subheader("💾 雲端保險箱")
-        uploaded_file = st.file_uploader("📤 1. 恢復記憶 (上傳歷史 CSV)", type=["csv"])
-        if uploaded_file is not None:
+    st.markdown("---")
+    st.subheader("💾 雲端保險箱")
+    uploaded_file = st.file_uploader("📤 1. 恢復記憶 (上傳歷史 CSV)", type=["csv"])
+    
+    # 【關鍵修復點】：加入按鈕保險栓，防止自動覆蓋
+    if uploaded_file is not None:
+        if st.button("📥 確認匯入此備份檔", type="primary"):
             try:
                 pd.read_csv(uploaded_file).to_csv(HISTORY_FILE, index=False)
-                st.success("✅ 記憶已恢復！請點擊上方載入")
-            except Exception as e: st.error(f"上傳失敗: {e}")
+                st.success("✅ 記憶已恢復！請點擊最上方『載入線上最新數據』")
+            except Exception as e: 
+                st.error(f"上傳失敗: {e}")
 
     if st.button("💾 2. 儲存今日最新狀態", type="primary"):
         now_str = datetime.now(pytz.timezone('Asia/Taipei')).strftime("%Y-%m-%d %H:%M")
@@ -275,7 +283,7 @@ with tab1:
     m3.metric("🎯 當前目標曝險", f"{target_attack_ratio:.0f}%", help=f"位階: {current_tier_name}")
     
     df_ladder = pd.DataFrame(ladder_data)
-    def highlight_current_row(row): return ['background-color: #ffcccc' if row['位階'] == current_tier_name else '' for _ in row]
+    def highlight_current_row(row): return ['background-color: #3b0000' if row['位階'] == current_tier_name else '' for _ in row] # 改為暗色系相容
     with m4:
         st.dataframe(df_ladder.style.apply(highlight_current_row, axis=1).format({"目標曝險": "{:.0f}%"}), hide_index=True, use_container_width=True)
 
@@ -296,7 +304,6 @@ with tab1:
 
     st.divider()
     
-    # 完美展開百萬/千萬級數字的寬度設定
     st.subheader("3. 投資組合核心數據")
     col1, col2, col3, col4, col5, col6 = st.columns([1.5, 1.5, 0.8, 1.0, 1.0, 1.0])
     
@@ -346,8 +353,7 @@ with tab2:
        * 🟢 P/E < 21 (俗) ➔ 買 **00675L** (低檔火力全開)。
        
     ### 🚨 V22 波動率煞車機制說明
-    系統會自動抓取台股近 60 日真實波動率，並套用連續時間凱利公式：$f^* = (市場報酬 - 槓桿成本) / 波動率^2$。
-    如果遇到股災，雖然 P/E 變便宜，但若當下市場極度恐慌、波動率飆升，系統會強制將您的槓桿上限下修。**寧可少賺反彈第一段，也絕不在高波動中被震出場。**
+    系統會自動抓取台股近 60 日真實波動率，並套用連續時間凱利公式。如果遇到股災，雖然 P/E 變便宜，但若當下市場極度恐慌、波動率飆升，系統會強制將您的槓桿上限下修。**寧可少賺反彈第一段，也絕不在高波動中被震出場。**
     
     ### ⚖️ V23.2 動態擴容閥值 (Auto-Scaling)
     系統會依據您的「真實淨資產」自動切換容忍度：
@@ -356,13 +362,11 @@ with tab2:
     """)
 
 # ==========================================
-# 🚀 這裡就是完美修復、對接您專屬變數的 V25 Tab 3
+# 🚀 V25 Tab 3: Alpha 選擇權導航中樞
 # ==========================================
 with tab3:
     st.header("🚀 選擇權每週戰情室 (TXO Weekly 動態對沖)")
 
-    # 1. 定義動態安全距離 (Volatility 防護網)
-    # 使用真正的變數：pe_val (大盤P/E)
     base_distance = 500
     if pe_val > 25.0:
         base_distance = 700
@@ -370,49 +374,33 @@ with tab3:
     elif pe_val < 20.0:
         base_distance = 600
 
-    # 2. 核心戰略判定引擎 (現貨 Delta 偏離度對沖)
-    # 使用真正的變數：gap (偏離度), current_index (大盤點數)
     if gap >= 1.5:
-        # 戰略 A：正偏離準備觸發賣出 -> 啟動 Synthetic Covered Call
         strategy_name = "Bear Call Spread (高空收租 / 預先鎖利)"
         strategy_icon = "🐻"
         strategy_desc = f"【狀態】現貨正偏離達 +{gap:.2f}%。現貨部位已超載上漲動能。\n\n【動作】在現貨觸發賣出閥值前，提前在上方賣出買權收租。大盤狂噴則現貨補貼期權；大盤回檔則權利金無風險落袋。"
-        
         sell_strike = int(current_index + base_distance)
-        sell_strike = round(sell_strike / 100) * 100 # 四捨五入到百位數
-        buy_strike = sell_strike + 500 # 嚴格鎖定 500 點保證金風險
+        sell_strike = round(sell_strike / 100) * 100 
+        buy_strike = sell_strike + 500 
 
     elif -1.0 <= gap < 1.5:
-        # 戰略 B：中性泥沼盤 -> 啟動 Iron Condor
         strategy_name = "Iron Condor (鐵鷹策略 / 泥沼盤雙收)"
         strategy_icon = "🦅"
         strategy_desc = f"【狀態】現貨偏離度為 {gap:.2f}% (中性健康區間)。大盤目前缺乏單邊極端動能。\n\n【動作】啟動鐵鷹策略，在上下安全距離外同時建立部位，雙向收取 Theta 時間價值。這是死魚盤的最佳提款機。"
-        
-        # 鐵鷹 Call 邊
-        sell_call = int(current_index + base_distance + 100)
-        sell_call = round(sell_call / 100) * 100
+        sell_call = round(int(current_index + base_distance + 100) / 100) * 100
         buy_call = sell_call + 500
-        
-        # 鐵鷹 Put 邊
-        sell_put = int(current_index - base_distance - 100)
-        sell_put = round(sell_put / 100) * 100
+        sell_put = round(int(current_index - base_distance - 100) / 100) * 100
         buy_put = sell_put - 500
 
     else:
-        # 戰略 C：負偏離 -> 啟動 Bull Put Spread
         strategy_name = "Bull Put Spread (低檔防守收租)"
         strategy_icon = "🐂"
         strategy_desc = f"【狀態】現貨負偏離達 {gap:.2f}%。大盤近期回檔，估值壓力減輕。\n\n【動作】在下方賣出賣權。若大盤撐住，賺取權利金；若大盤續跌，等同於順勢增加多頭曝險，完美配合現貨逢低加碼邏輯。"
-        
-        sell_strike = int(current_index - base_distance)
-        sell_strike = round(sell_strike / 100) * 100
+        sell_strike = round(int(current_index - base_distance) / 100) * 100
         buy_strike = sell_strike - 500
 
-    # 3. 渲染戰略面板
     st.markdown(f"### 🎯 本週建議策略：{strategy_icon} {strategy_name}")
     st.info(strategy_desc)
 
-    # 4. 履約價顯示卡片
     if "Iron Condor" in strategy_name:
         col1, col2 = st.columns(2)
         with col1:
@@ -436,7 +424,6 @@ with tab3:
 
     st.markdown("---")
     st.markdown("💡 **量化副手提醒**：以上為系統靜態基準點。極端跳空日或重大數據發布前，請將最新 CSV 傳送給 AI 副手，進行當日『勝率評估』與『最佳建倉時機 (Theta/Vega 決策)』。")
-
 
 with tab4:
     st.title("🔮 蒙地卡羅未來資產推演 (AI-Optimized Gravity Model)")
@@ -517,7 +504,7 @@ with tab4:
             
             st.subheader("📊 家族傳承真實財富報告")
             r1, r2, r3, r4 = st.columns(4)
-            r1.metric(f"💀 質押斷頭機率", f"{ruin_prob:.2f}%", help="未來任一月份券商維持率跌破 130% 的機率")
+            r1.metric(f"💀 質 এশিয়ার斷頭機率", f"{ruin_prob:.2f}%", help="未來任一月份券商維持率跌破 130% 的機率")
             r2.metric(f"⛈️ 最差 5% 真實財富", f"${p05:,.0f}", help="運氣極差情況下扣除所有負債後的剩餘淨值")
             r3.metric(f"⛅ 中位數 真實財富", f"${p50:,.0f}", help="最有可能發生的真實財富落點")
             r4.metric(f"☀️ 最佳 5% 真實財富", f"${p95:,.0f}", help="AI 超級週期延續情況下的真實財富")
@@ -527,7 +514,6 @@ with tab4:
             else:
                 st.success("✅ **系統評估：** 您的投資組合抗壓性極佳，請安心享受時間複利。")
 
-# --- 9. 🆕 Tab 5：系統年度校準與診斷 (Calibration Room) ---
 with tab5:
     st.title("⚖️ 系統校準與診斷 (Calibration Room)")
     st.markdown("自動比對雲端保險箱內的歷史軌跡，進行系統自我診斷與參數微調建議。建議每季檢視一次。")
@@ -535,19 +521,16 @@ with tab5:
     if os.path.exists(HISTORY_FILE):
         df_hist = pd.read_csv(HISTORY_FILE)
         if len(df_hist) >= 2:
-            # 確保 'True_Net_Assets' 存在 (相容舊版 CSV)
             if 'True_Net_Assets' not in df_hist.columns:
                 df_hist['True_Net_Assets'] = df_hist['Net_Assets'] if 'Net_Assets' in df_hist.columns else df_hist['Total_Assets']
                 
             df_hist['Date'] = pd.to_datetime(df_hist['Date'])
             df_hist = df_hist.sort_values('Date')
 
-            # 繪製歷史軌跡圖
             fig_hist = px.line(df_hist, x='Date', y='True_Net_Assets', title="💎 真實淨資產歷史軌跡 (依據存檔紀錄)", markers=True)
             fig_hist.update_layout(template="plotly_dark", yaxis_title="真實淨資產")
             st.plotly_chart(fig_hist, use_container_width=True)
 
-            # 運算績效指標
             start_date = df_hist['Date'].iloc[0]
             end_date = df_hist['Date'].iloc[-1]
             days_passed = (end_date - start_date).days
@@ -569,7 +552,6 @@ with tab5:
 
             st.markdown("### 🛠️ 動態參數校準建議")
             
-            # 診斷 1: 實際報酬率檢驗
             st.markdown("#### 1. 成長動能檢測")
             if days_passed < 90:
                 st.info("ℹ️ **樣本數不足**：追蹤時間未滿一季 (90天)，目前的年化報酬率可能因短期波動失真，請繼續累積存檔紀錄。")
@@ -581,7 +563,6 @@ with tab5:
                 else:
                     st.info("✅ **健康巡航**：資產增長符合預期區間，請繼續保持動態擴容與波動率煞車的良好紀律。")
 
-            # 診斷 2: 槓桿成本(質押利率)校準
             st.markdown("#### 2. 資金成本校準 ($r$)")
             st.markdown("請輸入您**目前實際**的券商質押利率。系統將評估是否會吃掉正二的逆價差紅利：")
             actual_rate = st.number_input("輸入目前實際質押年利率 (%)", value=2.5, step=0.1)
